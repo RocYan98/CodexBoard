@@ -168,4 +168,22 @@ fb4745f5378c8a4122f74643a3c7c1000da5f4b184f0d9dc9faf275c79ac73a4
 
 从开始菜单启动后，实际看到白色 OpenAI logo 加载画面；此后浏览器控制连接丢失，尚未确认登录页或主界面。连接中断本身不构成应用崩溃或安装失败的证据。
 
-本次验证的是 OpenAI 官方 Codex 运行环境的安装，不是 CodexBoard Windows 安装包。上述结果不证明 Windows 11、Codex 登录、IPC、真实任务或完整应用功能已通过。
+2026-09-23 通过 Chrome 恢复无影画面后，已实际看到该应用登录后的工作主界面，启动及已登录界面验证通过。此后没有创建项目或任务，也没有验证在线令牌、任务执行或 CodexBoard 集成。
+
+本次验证的是 OpenAI 官方 Codex 运行环境的安装与主界面启动，不是 CodexBoard Windows 安装包。上述结果不证明 Windows 11、IPC、真实任务或完整应用功能已通过。
+
+## 2026-09-23 Windows 桥接检查准备
+
+在 `4a80653` 上只读审查现有桥接入口，并核对已下载官方 MSIX 的 manifest 与文件表。桌面入口为 `app\ChatGPT.exe`，CLI 为 `app\resources\codex.exe`；包内另一个 `app\Codex.exe` 不能据文件名当作 CLI。包内容核对不等于云桌面运行验证。
+
+真实集成验证前仍有以下代码阻断：
+
+| 位置                                                                              | 当前行为                                                                   |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `scripts/codex-desktop-session.mjs`                                               | 默认连接 `codexHome/ipc/ipc.sock`，调用方尚未发现或传入 Windows 管道地址。 |
+| `scripts/codex-desktop-loader.mjs`                                                | 连接失败后的自动打开线程仅支持 `darwin`，启动命令使用 `/usr/bin/open`。    |
+| `apps/desktop/scripts/setup-controller.mjs`                                       | 程序探测仍使用 macOS/Unix 路径，没有 MSIX 包与 `codex.exe` 的发现流程。    |
+| `apps/server/src/modules/codex/supervisor.ts`、`scripts/codex-session-bridge.mjs` | supervisor 固定构造 `unix://`，桥接 CLI 也只接受该协议。                   |
+| `scripts/run-codex-app-server.mjs`、`apps/server/src/modules/codex/transports.ts` | 仍依赖 POSIX `0600` 权限检查，Windows ACL 的等效保护未实现。               |
+
+下一步实机检查仅收集当前用户 `OpenAI.Codex` 包元信息、包内入口文件是否存在、匹配的开始菜单入口、安装目录内关联进程的 PID 与可执行文件路径，以及名称包含 Codex/OpenAI 的命名管道候选。不读取认证文件、命令行、环境变量或现有日志，不连接管道或接管会话。没有匹配进程或管道不能独立证明崩溃或没有 IPC；桥接 `/readyz` 在 helper 启动前即可返回 200，也不能作为集成成功的证据。
