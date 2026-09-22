@@ -112,11 +112,15 @@ export function writeProjectSnapshot(snapshotFile, snapshot) {
     descriptor = undefined;
     chmodSync(temporary, 0o600);
     renameSync(temporary, path);
-    const directoryDescriptor = openSync(directory, "r");
-    try {
-      fsyncSync(directoryDescriptor);
-    } finally {
-      closeSync(directoryDescriptor);
+    // Node cannot fsync directory handles on Windows. The file is still flushed
+    // before atomic replacement; directory durability is available on POSIX.
+    if (process.platform !== "win32") {
+      const directoryDescriptor = openSync(directory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
     }
     return true;
   } catch (error) {

@@ -1,16 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, {
+  fstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import {
   readCodexDesktopProjects,
   startCodexProjectSnapshotWriter,
+  writeProjectSnapshot,
 } from "./codex-project-snapshot.mjs";
 
 const PROJECT_A = "11111111-1111-4111-8111-111111111111";
 const PROJECT_B = "22222222-2222-4222-8222-222222222222";
+const PROJECT_ROOT = resolve(tmpdir(), "codexboard-snapshot-fixture-projects");
+const PROJECT_A_PATH = join(PROJECT_ROOT, "Projects", "codex-paper");
 
 test("passes an absolute project snapshot path from the root development command", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -23,17 +36,17 @@ function state(projectOrder = [PROJECT_A], overrides = {}) {
       [PROJECT_A]: {
         id: PROJECT_A,
         name: "论文",
-        rootPaths: ["/Users/test/Projects/codex-paper"],
+        rootPaths: [PROJECT_A_PATH],
       },
       [PROJECT_B]: {
         id: PROJECT_B,
         name: "Docker",
-        rootPaths: ["/Users/test/Docker"],
+        rootPaths: [join(PROJECT_ROOT, "Docker")],
       },
       internal: {
         id: "internal",
         name: "临时",
-        rootPaths: ["/Users/test/.codex/.chatgpt-projects/internal"],
+        rootPaths: [join(PROJECT_ROOT, ".codex", ".chatgpt-projects", "internal")],
       },
       ...overrides,
     },
@@ -65,7 +78,7 @@ test("filters the Desktop state strictly by project-order", () => {
       {
         codexProjectId: PROJECT_A,
         name: "论文",
-        rootPaths: ["/Users/test/Projects/codex-paper"],
+        rootPaths: [PROJECT_A_PATH],
         position: 0,
       },
     ]);
@@ -80,6 +93,81 @@ test("filters the Desktop state strictly by project-order", () => {
     assert.throws(() => readCodexDesktopProjects(value.stateFile), /绝对路径/);
     writeFileSync(value.stateFile, `${JSON.stringify(state(["missing-project"]))}\n`);
     assert.throws(() => readCodexDesktopProjects(value.stateFile), /记录无效/);
+  } finally {
+    rmSync(value.directory, { recursive: true, force: true });
+  }
+});
+
+test("flushes each snapshot file before atomic replacement and syncs directories where supported", (t) => {
+  const value = fixture();
+  const snapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-09-01T12:00:00.000Z",
+    projects: readCodexDesktopProjects(value.stateFile),
+  };
+  const operations = [];
+  const originalFsync = fs.fsyncSync;
+  const originalRename = fs.renameSync;
+  const sync = t.mock.method(fs, "fsyncSync", (descriptor) => {
+    operations.push(fstatSync(descriptor).isDirectory() ? "directory-flush" : "file-flush");
+    return originalFsync(descriptor);
+  });
+  const rename = t.mock.method(fs, "renameSync", (source, destination) => {
+    assert.equal(operations.at(-1), "file-flush");
+    assert.equal(dirname(source), dirname(destination));
+    operations.push("rename");
+    return originalRename(source, destination);
+  });
+  syncBuiltinESMExports();
+  try {
+    const expected =
+      process.platform === "win32"
+        ? ["file-flush", "rename"]
+        : ["file-flush", "rename", "directory-flush"];
+    assert.equal(writeProjectSnapshot(value.snapshotFile, snapshot), true);
+    assert.deepEqual(JSON.parse(readFileSync(value.snapshotFile, "utf8")), snapshot);
+    assert.deepEqual(operations, expected);
+    operations.length = 0;
+    const replacement = { ...snapshot, generatedAt: "2026-09-02T12:00:00.000Z", projects: [] };
+    assert.equal(writeProjectSnapshot(value.snapshotFile, replacement), true);
+    assert.deepEqual(JSON.parse(readFileSync(value.snapshotFile, "utf8")), replacement);
+    assert.deepEqual(operations, expected);
+    assert.deepEqual(readdirSync(dirname(value.snapshotFile)), ["codex-projects.json"]);
+  } finally {
+    sync.mock.restore();
+    rename.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(value.directory, { recursive: true, force: true });
+  }
+});
+
+test("propagates a file flush failure and preserves the previous snapshot without temporary files", (t) => {
+  const value = fixture();
+  const snapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-09-01T12:00:00.000Z",
+    projects: readCodexDesktopProjects(value.stateFile),
+  };
+  try {
+    writeProjectSnapshot(value.snapshotFile, snapshot);
+    const lastGood = readFileSync(value.snapshotFile, "utf8");
+    const failure = Object.assign(new Error("simulated file flush failure"), { code: "EIO" });
+    const sync = t.mock.method(fs, "fsyncSync", (descriptor) => {
+      assert.equal(fstatSync(descriptor).isFile(), true);
+      throw failure;
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.throws(
+        () => writeProjectSnapshot(value.snapshotFile, { ...snapshot, projects: [] }),
+        (error) => error === failure,
+      );
+      assert.equal(readFileSync(value.snapshotFile, "utf8"), lastGood);
+      assert.deepEqual(readdirSync(dirname(value.snapshotFile)), ["codex-projects.json"]);
+    } finally {
+      sync.mock.restore();
+      syncBuiltinESMExports();
+    }
   } finally {
     rmSync(value.directory, { recursive: true, force: true });
   }

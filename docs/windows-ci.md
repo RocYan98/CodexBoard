@@ -56,7 +56,7 @@ Rust 检查命令：
 cargo check --locked --all-targets --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-在 macOS 上运行同一组命令只提供 macOS 证据。Windows 结论必须对应实际 Windows Actions 运行记录。
+在 macOS 上运行同一组命令只提供 macOS 证据。Windows 结论必须对应实际 Windows 环境及具体源码版本的运行记录。
 
 ## 2026-09-19 实际基线
 
@@ -86,3 +86,47 @@ cargo check --locked --all-targets --manifest-path apps/desktop/src-tauri/Cargo.
 3. Codex Desktop IPC、Unix socket、进程停止和 POSIX 启动包装器。
 4. 将 `/private/tmp`、macOS 临时目录别名和固定正斜杠等测试夹具改为明确的平台语义，保留安全断言。
 5. Windows 图标、桌面资源及 Rust 平台模块；之后验证安装更新与真实 Codex 会话。备份入口、浏览器超时等其他失败仍需分别复现定位。
+
+## 2026-09-22 云桌面验证
+
+本轮在云桌面中运行便携 Node `v22.23.2`（`win32` / `x64`）和最小测试包，使用独立临时用户配置与测试目录，未读取既有 Codex 账号或项目配置，未连接真实 Codex 会话。验证范围为测试执行器自身和项目快照脚本。
+
+### 青椒云：修复前基线
+
+环境为 Windows 10 IoT Enterprise LTSC 2021，build `19044`，使用 Administrator 账号执行。源码基线为 `234654491476088b64e32cf806751c912112dff0`（`2346544`）。
+
+- 测试执行器：8 项全部通过。
+- 项目快照：4 项中 1 项通过、3 项失败。
+- 单独调用 `writeProjectSnapshot` 写入空项目快照，实际返回 `EPERM`，操作为 `fsync`。该直接探测与代码检查定位到原子替换之后的目录同步；Windows 不支持本实现使用的目录 fsync。
+
+### 无影：快照修复后复测
+
+环境实测为 Microsoft Windows Server 2022 Datacenter，版本 `10.0.20348`、build `20348`、64 位。运行时确认为 Node `v22.23.2` / `win32` / `x64`。
+
+复测源码由基线 `2346544` 加当时尚未提交的以下两个文件改动组成：
+
+- `scripts/codex-project-snapshot.mjs`：Windows 跳过目录 fsync，保留文件 fsync、原子 rename 和文件同步失败的错误传播。
+- `scripts/codex-project-snapshot.test.mjs`：夹具使用平台原生绝对路径，补充同步顺序和失败保留旧快照测试，保留原有 `0600` 权限断言。
+
+上述改动已通过独立审查；macOS 上该快照测试文件 6 项全部通过，格式与 ESLint 检查通过。云端确认外层验证包、便携 Node 包和修复源码包的 SHA-256 均校验成功。其中修复源码包 `codexboard-windows-snapshot-fix.zip` 的 SHA-256 为：
+
+```text
+5d0f15955b3defdb750b7607bdf05c47bca38bdf70abbaf5bade50b0db33b59a
+```
+
+无影结果从本轮生成的 `summary.json`、分组结果及日志所呈现的本地 HTML 逐项核验：
+
+| 测试组         | 总数 | 通过 | 失败 | 跳过 | Node 退出码 |
+| -------------- | ---: | ---: | ---: | ---: | ----------: |
+| 测试执行器自身 |    8 |    8 |    0 |    0 |           0 |
+| 项目快照       |    6 |    5 |    1 |    0 |           1 |
+
+快照首次写入与替换前的文件 fsync、文件同步失败时保留旧文件并清理临时文件，以及状态文件原子替换后的监听更新均通过。唯一剩余失败是 `keeps the last good snapshot and reports only a safe error code` 中的权限断言，位置为本次测试包的 `scripts/codex-project-snapshot.test.mjs:192:12`：
+
+```text
+ERR_ASSERTION: 438 !== 384
+```
+
+十进制 `438` 对应 `0666`，期望的 `384` 对应 `0600`。该失败保持原样，未跳过测试或放宽断言。Windows 下的 mode 值不能替代 ACL 验证；当前尚未实现和验收等效的 Windows 权限保护。
+
+本轮证明最小测试包可在上述两种实际 Windows 环境运行，并验证了 Server 2022 上的快照目录 fsync 修复。它不代表 Windows 11、Windows ACL 或标准用户隔离、桌面安装包与更新、完整应用、真实 Codex 登录及会话集成已通过；Windows 掉电后的目录持久性也未验证。
