@@ -130,3 +130,42 @@ ERR_ASSERTION: 438 !== 384
 十进制 `438` 对应 `0666`，期望的 `384` 对应 `0600`。该失败保持原样，未跳过测试或放宽断言。Windows 下的 mode 值不能替代 ACL 验证；当前尚未实现和验收等效的 Windows 权限保护。
 
 本轮证明最小测试包可在上述两种实际 Windows 环境运行，并验证了 Server 2022 上的快照目录 fsync 修复。它不代表 Windows 11、Windows ACL 或标准用户隔离、桌面安装包与更新、完整应用、真实 Codex 登录及会话集成已通过；Windows 掉电后的目录持久性也未验证。
+
+## 2026-09-22 Actions 提交后复测
+
+快照修复提交 `db016ab539e0d5672a7de19ec719eab451b7188b` 推送后触发 [Windows Actions 运行 35748288642](https://github.com/RocYan98/CodexBoard/actions/runs/35748288642)。本次为 push 事件、首次运行，已于 `2026-09-22T15:38:24Z` 完成，整体结论为 **failure**。测试报告确认平台为 `win32` / `x64` / Node `v22.23.2`。
+
+按六组 JUnit testcase 记录核对，最终结果如下：
+
+| 测试组          | 总数 | 通过 | 失败 | 跳过 | Node 退出码 |
+| --------------- | ---: | ---: | ---: | ---: | ----------: |
+| contracts       |   49 |   49 |    0 |    0 |           0 |
+| web             |  204 |  204 |    0 |    0 |           0 |
+| taskctl         |  103 |   97 |    6 |    0 |           1 |
+| server          |  609 |  511 |   97 |    1 |           1 |
+| scripts         |  104 |   37 |   67 |    0 |           1 |
+| desktop-scripts |  223 |  144 |   79 |    0 |           1 |
+
+scripts 的 67 项 JUnit 失败包含 66 项普通失败和 1 项超时取消；整组约 121 秒后输出完整报告。测试执行器自身 8 项回归全部通过。
+
+项目快照在完整 scripts 组内仍为 **6 项中 5 项通过、1 项失败**，与无影云桌面的独立复测一致。唯一失败仍是 `keeps the last good snapshot and reports only a safe error code` 在 `scripts/codex-project-snapshot.test.mjs:192:12` 的 `438 !== 384` 权限断言。文件 fsync 与原子替换顺序、文件同步失败时保留旧快照，以及原子替换后的监听更新均通过。原始证据见 [本次 scripts 测试 artifact](https://github.com/RocYan98/CodexBoard/actions/runs/35748288642/artifacts/10703163260)。
+
+与 2026-09-19 基线逐项对比，scripts 从 33 项通过、69 项失败变为 37 项通过、67 项失败：项目顺序读取和状态替换后的监听两项由失败转为通过，新增的两项文件同步回归均通过。server 从 510 项通过、98 项失败、1 项跳过变为 511 项通过、97 项失败、1 项跳过；变化来自 `test/web-accounts.test.ts` 的 `locks after five guesses across service instances and disables existing sessions`，只记录本次运行差异，不归因于快照修复。其他四组计数与基线相同。
+
+四个 Node/Web 工作区构建、类型检查与 ESLint 均通过，六组报告、构建产物及编译证据共 8 个 artifact 已上传。桌面 Rust 检查仍返回 101，阻断于 `tauri-build` 缺少 `icons/icon.ico`；后续 Rust 平台编译错误尚未覆盖，也未生成 Windows 桌面安装包。
+
+## 官方 Windows Codex 运行环境安装验证
+
+在无影 Windows Server 2022 Datacenter（build `20348`）上，以管理员账号验证了 [OpenAI 官方 Windows MSIX 包](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix)。包版本为 `26.915.4065.0`、架构 `x64`、大小 `824570408` 字节，SHA-256 为：
+
+```text
+fb4745f5378c8a4122f74643a3c7c1000da5f4b184f0d9dc9faf275c79ac73a4
+```
+
+包经 25 个分片上传，逐片及合并后的全包哈希均通过；官方许可证文件哈希通过，MSIX 的 Authenticode 签名状态为 `Valid`。使用 `Add-AppxProvisionedPackage -Online -PackagePath -LicensePath` 完成系统预配，未使用 `SkipLicense` 或 `Regions all`。当前用户已存在同版本包登记，无需再次执行 `Add-AppxPackage`。
+
+当前用户包最初显示 `DeploymentInProgress, Servicing`，随后只读复查确认 `Status: Ok`、`SignatureKind: Store`，登记验证结果为 `verified-without-changes`。包名为 `OpenAI.Codex`，显示名为 `ChatGPT`。
+
+从开始菜单启动后，实际看到白色 OpenAI logo 加载画面；此后浏览器控制连接丢失，尚未确认登录页或主界面。连接中断本身不构成应用崩溃或安装失败的证据。
+
+本次验证的是 OpenAI 官方 Codex 运行环境的安装，不是 CodexBoard Windows 安装包。上述结果不证明 Windows 11、Codex 登录、IPC、真实任务或完整应用功能已通过。
