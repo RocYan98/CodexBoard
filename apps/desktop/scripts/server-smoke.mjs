@@ -1,10 +1,11 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve, win32 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 import { ensurePrivateDirectorySync, ensurePrivateFileSync } from "#private-file-permissions";
 import { nodeScriptArguments } from "#node-script-arguments";
@@ -27,6 +28,84 @@ const knownErrors = new Set([
   "SQLITE_CANTOPEN",
   "SQLITE_BUSY",
 ]);
+const configFields = [
+  "CODEXBOARD_CODEX_TOKEN_FILE",
+  "CODEXBOARD_WEB_ROOT",
+  "CODEXBOARD_WORKSPACE_ROOTS",
+  "CODEXBOARD_CODEX_ENDPOINT",
+  "CODEXBOARD_PORT",
+  "CODEXBOARD_ADMIN_PORT",
+  "CODEXBOARD_DATA_DIR",
+  "CODEXBOARD_AUTH_MODE",
+  "CODEXBOARD_ORIGIN",
+  "CODEXBOARD_CODEX_PROJECT_SNAPSHOT_FILE",
+];
+
+// Run only against the same isolated fixture after a failed backend. Config
+// validation reads synthetic files; it does not import main or start a bridge.
+export function smokeConfigDiagnostics({ runtimeRoot, nodePath, env }) {
+  const allowed = new Set([
+    "SMOKE_CONFIG_IMPORT_FAILED",
+    "SMOKE_CONFIG_RECHECK_PASSED",
+    "SMOKE_CONFIG_RECHECK_FAILED",
+    "ACL_FAILED",
+    "WEB_INDEX_MISSING",
+    "TOKEN_EMPTY",
+    ...configFields,
+  ]);
+  const program = `
+    const fields = new Set(${JSON.stringify(configFields)});
+    let stage = 'import';
+    try {
+      const { loadConfig } = await import(process.argv[1]);
+      stage = 'config';
+      loadConfig();
+      console.log(JSON.stringify(['SMOKE_CONFIG_RECHECK_PASSED']));
+    } catch (error) {
+      const issues = Array.isArray(error.issues)
+        ? error.issues.filter(issue => typeof issue === 'string') : [];
+      const codes = [stage === 'import' ? 'SMOKE_CONFIG_IMPORT_FAILED' : 'SMOKE_CONFIG_RECHECK_FAILED'];
+      for (const issue of issues) {
+        const field = issue.split(':', 1)[0];
+        if (fields.has(field)) codes.push(field);
+        if (issue.includes('Windows 私有 ACL 检查失败')) codes.push('ACL_FAILED');
+        if (issue.includes('Web 构建目录缺少 index.html')) codes.push('WEB_INDEX_MISSING');
+        if (issue.includes('文件内容为空')) codes.push('TOKEN_EMPTY');
+      }
+      console.log(JSON.stringify([...new Set(codes)]));
+      process.exitCode = 1;
+    }
+  `;
+  const result = spawnSync(
+    nodePath,
+    [
+      "--input-type=module",
+      "-e",
+      program,
+      pathToFileURL(join(runtimeRoot, "apps/server/dist/config.js")).href,
+    ],
+    {
+      cwd: runtimeRoot,
+      env,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+      maxBuffer: 8192,
+    },
+  );
+  // Never relay the child stderr or arbitrary config issue text, even when a
+  // dependency prints before the JSON result or the diagnostic itself fails.
+  if (!result.error) {
+    try {
+      const codes = JSON.parse(result.stdout);
+      if (Array.isArray(codes) && codes.length && codes.every((code) => allowed.has(code)))
+        return [...new Set(codes)];
+    } catch {
+      /* Return only a fixed diagnostic failure below. */
+    }
+  }
+  return ["SMOKE_CONFIG_DIAGNOSTIC_FAILED"];
+}
 
 function smokeError(code, diagnostics = []) {
   const error = new Error(`${code}${diagnostics.length ? `: ${diagnostics.join(",")}` : ""}`);
@@ -66,7 +145,12 @@ function request(port, path) {
 }
 
 /** Exercises only an explicitly supplied package with synthetic data and a local fake peer. */
-export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 120_000 }) {
+export async function smokePackagedServer({
+  runtimeRoot,
+  nodePath,
+  timeoutMs = 120_000,
+  onStage = () => {},
+}) {
   if (!runtimeRoot || !nodePath) throw smokeError("SMOKE_EXPLICIT_PACKAGE_REQUIRED");
   // Match Tauri's canonical Windows resource directory, including the namespace
   // prefix passed through cwd and web assets, rather than testing only argv.
@@ -81,6 +165,7 @@ export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 1
   let child, closed, outcome, peer, api, admin;
   let unexpectedMethod = false;
   try {
+    onStage("private-fixture");
     ensurePrivateDirectorySync(scratch);
     const home = join(scratch, "home");
     const data = join(scratch, "data");
@@ -182,6 +267,7 @@ export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 1
     });
     await api.close();
     await admin.close();
+    onStage("backend-spawn");
     child = spawn(nodePath, nodeScriptArguments(script), {
       cwd: root,
       env,
@@ -222,7 +308,12 @@ export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 1
       }
       await delay(100);
     }
-    if (!ready)
+    if (!ready) {
+      if (diagnostics.has("CONFIG_INVALID")) {
+        onStage("config-diagnostic");
+        for (const code of smokeConfigDiagnostics({ runtimeRoot: root, nodePath, env }))
+          diagnostics.add(code);
+      }
       throw smokeError(outcome ? "SMOKE_BACKEND_EXITED" : "SMOKE_BACKEND_TIMEOUT", [
         ...diagnostics,
         ...(Number.isInteger(outcome?.code) ? [`EXIT_${outcome.code}`] : []),
@@ -230,6 +321,8 @@ export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 1
           ? [outcome.signal]
           : []),
       ]);
+    }
+    onStage("backend-ready");
     const page = await request(api.port, "/");
     if (
       page.status !== 200 ||
@@ -240,6 +333,7 @@ export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 1
     const protectedRoute = await request(api.port, "/api/v1/projects");
     if (protectedRoute.status !== 401) throw smokeError("SMOKE_AUTH_BOUNDARY_FAILED");
     if (unexpectedMethod) throw smokeError("SMOKE_FAKE_PEER_REJECTED_METHOD");
+    onStage("backend-shutdown");
     child.send({ type: "codexboard.shutdown" });
     const stopped = await new Promise((resolve) => {
       const timer = setTimeout(() => resolve(null), 15_000);
@@ -261,6 +355,7 @@ export async function smokePackagedServer({ runtimeRoot, nodePath, timeoutMs = 1
       codexMode: "isolated-fake-websocket",
     };
   } finally {
+    onStage("fixture-cleanup");
     if (child && !outcome) {
       child.kill("SIGKILL");
       await closed;
