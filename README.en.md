@@ -206,4 +206,4 @@ When reporting an issue, include the app version, macOS version, steps to reprod
 
 ## Source code and technical references
 
-Developers can consult the [development and operations reference](docs/development.md), [desktop app documentation](apps/desktop/README.md), and [taskctl command reference](docs/taskctl.md). These documents are in Chinese and are intended for development and troubleshooting; a normal installation does not require running their build commands.
+Developers can consult the [desktop app documentation](apps/desktop/README.md) (in Chinese). Use `taskctl --help` for command usage; a normal installation does not require running build commands.

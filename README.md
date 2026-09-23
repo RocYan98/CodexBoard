@@ -205,4 +205,4 @@ macOS 在 **应用设置 → 应用更新** 中，可通过“前往 Release 手
 
 ## 源码与技术资料
 
-开发者可查阅 [开发与运维参考](docs/development.md)、[桌面应用说明](apps/desktop/README.md)和 [taskctl 命令参考](docs/taskctl.md)。这些资料供开发与排障使用，普通安装不需要执行其中的构建命令。
+开发者可查阅 [桌面应用说明](apps/desktop/README.md)。命令用法可通过 `taskctl --help` 查看；普通安装不需要执行构建命令。
