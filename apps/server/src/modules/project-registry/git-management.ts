@@ -291,7 +291,13 @@ export class GitManagement {
         } catch {
           throw conflict("请先在仓库 .gitignore 中添加 .worktrees/，再创建工作树");
         }
-        if (!parentExists) await this.#run(view.mainPath, ["/bin/mkdir", "--", parent]);
+        if (!parentExists)
+          await this.#run(
+            view.mainPath,
+            process.platform === "win32"
+              ? [process.execPath, "-e", "require('node:fs').mkdirSync(process.argv[1])", parent]
+              : ["/bin/mkdir", "--", parent],
+          );
         if (this.#allowed(parent) !== parent) throw conflict(".worktrees 路径包含符号链接");
         await this.#git(
           view.mainPath,

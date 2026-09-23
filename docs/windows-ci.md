@@ -12,25 +12,27 @@
 | contracts / taskctl / server / web tests | 各工作区完整 Vitest 测试，不通过排除 Windows 失败用例取得绿灯                                     |
 | scripts tests                            | `scripts/` 下完整 Node 测试，显式展开文件列表，避免依赖 shell 通配符                              |
 | desktop-scripts tests                    | 桌面脚本完整 Node 测试，包含 Chromium 和 WebKit 界面检查                                          |
-| Desktop Rust compilation                 | 使用 Cargo 锁文件检查桌面程序及测试目标，记录 Windows 编译阻断                                    |
+| Desktop Rust compilation                 | 使用 Cargo 锁文件检查桌面程序及测试目标                                                           |
+| Test installer                           | 校验并打包 Windows x64 Node/Caddy/frpc，生成独立测试用 NSIS 安装包及 SHA-256                      |
 
 每个测试组独立运行，一个组失败不会取消其他组。失败保留非零退出码，工作流总状态也会失败。不能把“工作流成功启动”或“网页构建通过”解释为 Windows 桌面版已适配。
 
 检出前关闭运行器的 Git 自动换行转换，保留仓库原始字节，避免带固定哈希的上游许可证被转换为 CRLF 后产生无关的校验失败。
 
-Node 脚本测试使用 120 秒的测试超时；挂起或遗留句柄按失败记录到 JUnit，不强制将未退出的测试算作通过。Vitest 使用各工作区原有超时。外层作业另有时限，防止兼容性问题长期占用运行器。
+Node 脚本测试默认使用 120 秒的文件超时；Windows 桌面脚本因真实 ACL 检查启动多个 PowerShell 进程，使用 300 秒。挂起或遗留句柄按失败记录到 JUnit，不强制将未退出的测试算作通过。Windows server/taskctl 的 Vitest 单项和 hook 使用 30 秒预算、最多两个 worker。外层作业另有时限。
 
-本阶段不运行需要真实 Codex 的 `codex:protocol:check`，不启动真实任务、不使用飞书凭据，不运行依赖 Unix 模拟桌面的整体 `test:e2e`。Windows 安装包、运行时组件分发、标准用户权限与 ACL、真实 Codex 会话和安装更新验收属于后续阶段。GitHub Windows 运行器以管理员运行，不能代替普通 Windows 11 用户的权限验收。
+CI 不运行需要真实 Codex 的 `codex:protocol:check`，不启动真实任务、不使用飞书凭据，不运行依赖 Unix 模拟桌面的整体 `test:e2e`。Windows ACL 有真实 DACL 检查；GitHub Windows 运行器以管理员运行，仍不能代替普通 Windows 11 用户的隔离验收。真实桌面集成在独立云桌面验证。
 
 ## 产物与结果
 
-在仓库 **Actions → Windows compatibility baseline** 查看具体提交的运行记录：
+在仓库 **Actions → Windows build and validation** 查看具体提交的运行记录：
 
 - `windows-x64-node-web-build-<commit>`：四个工作区编译结果及 `build-info.json`。它不包含 Node、生产依赖或桌面启动器，不是可安装或独立运行的 Windows 发行包。
 - `windows-x64-tests-<suite>-<commit>`：JUnit 报告、标准输出、标准错误和带平台信息的 `result.json`。
 - `windows-x64-desktop-check-<commit>`：Rust 工具链版本、编译日志和退出状态。
+- `windows-x64-test-installer-<commit>`：独立测试安装包、SHA-256 与构建信息。构建成功才上传，不发布到 Release。
 
-产物保留 14 天。安装依赖或作业超时可能导致报告不完整，此时以作业日志和失败状态为准。测试结果中的 skip 来自现有测试本身；新工作流没有按平台过滤测试。
+产物保留 14 天。安装依赖或作业超时可能导致报告不完整，此时以作业日志和失败状态为准。平台专属的旧 macOS 启动器和 shell 包装器测试只在对应平台运行；Windows 包装器与权限使用单独的真实 Windows 用例，通用功能测试保持运行。
 
 ## 本地复现
 
@@ -203,3 +205,15 @@ fb4745f5378c8a4122f74643a3c7c1000da5f4b184f0d9dc9faf275c79ac73a4
 本轮新建报告保存在云桌面的 `C:\Users\admin\Downloads\037d6e48-7008-48cc-9be1-3809b5d37600\`，包含 `result.json`、`report.html` 和初步包信息页 `package.html`。文件未下载到 Mac。查询没有读取认证文件、进程命令行、环境变量列表或现有日志；仅使用 `USERPROFILE` 定位 Downloads 目录。没有连接 IPC、接管会话、启动真实任务或修改安全策略。
 
 本轮确认了已安装包、运行进程及 `codex-ipc` 命名管道候选的存在，下一步仍需实现 Windows IPC 适配并验证实际协议与权限。上述静态桥接阻断、CI 失败、Rust 图标缺失和 `0600` 权限断言失败均未因此解决；不能据此认定 CodexBoard Windows 版可运行。桥接 `/readyz` 在 helper 启动前即可返回 200，也不能作为集成成功的证据。
+
+## 2026-09-23 Windows 适配后的验证
+
+实现提交 `cd1309a087937439ee010d2b76d42a30edca324c` 的 [Actions 运行 35805907531](https://github.com/RocYan98/CodexBoard/actions/runs/35805907531) 已通过 Windows Rust 编译、Node/Web 构建、类型检查、ESLint 及 contracts/taskctl/web 测试。scripts、server、desktop-scripts 仍有失败，保持失败状态继续修复。安装作业已编译出 Windows 原生程序，但被 `webview2-com-sys@0.38.2` 缺少许可证正文阻断，未生成可用安装包。
+
+同日在无影 Server 2022 中，从上述提交下载 `probe-codex-desktop-ipc.mjs` 和 `codex-local-endpoint.mjs`，核对两文件 SHA-256 后，以既有便携 Node 22.23.2 运行。真实 `\\.\pipe\codex-ipc` 初始化返回：
+
+```json
+{ "status": "ready", "transport": "named-pipe", "framing": "uint32le-json", "initialized": true }
+```
+
+结果保存在既有 Downloads 测试目录的 `ipc-probe.json`。探针只建立临时连接并发送 `initialize`，随后关闭连接；没有读取会话列表、订阅任务、读取历史或启动任务。该结果确认 Windows Desktop IPC 传输与初始化协议，不代替完整应用、用户权限隔离、真实任务执行或 Windows 11 验证。

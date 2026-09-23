@@ -43,6 +43,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit }))
       });
       await page.addScriptTag({ content: readFileSync(new URL("app.js", ui), "utf8") });
       await page.locator('[data-tab="connections"]').click();
+      await page.locator("#connections-card > summary").click();
       assert.equal(
         await page
           .locator("#public-domain,#public-port,#certificate-file,#private-key-file,#tcp-protocol")

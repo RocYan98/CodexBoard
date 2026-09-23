@@ -1,3 +1,4 @@
+import { makePublicReadableSync } from "../../../scripts/test-support/private-access.mjs";
 import { ensurePrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -425,7 +426,8 @@ describe("unified Feishu credentials configuration", () => {
 function writePrivateFixture(...args: Parameters<typeof writeFileSync>): void {
   writeFileSync(...args);
   const options = args[2];
-  if (options && typeof options === "object" && options.mode === 0o600) {
-    ensurePrivateFileSync(String(args[0]));
+  if (options && typeof options === "object") {
+    if (options.mode === 0o600 || options.mode === 0o644) ensurePrivateFileSync(String(args[0]));
+    if (options.mode === 0o644) makePublicReadableSync(String(args[0]));
   }
 }

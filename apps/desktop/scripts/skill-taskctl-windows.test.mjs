@@ -33,7 +33,7 @@ function fixture(t) {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "$a=@(ConvertFrom-Json $env:CODEXBOARD_TEST_ARGS); & $env:CODEXBOARD_TEST_WRAPPER @a; exit $LASTEXITCODE",
+        "$a=ConvertFrom-Json $env:CODEXBOARD_TEST_ARGS; & $env:CODEXBOARD_TEST_WRAPPER @a; exit $LASTEXITCODE",
       ],
       {
         cwd,

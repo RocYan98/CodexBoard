@@ -2,6 +2,7 @@ import { HealthResponseSchema } from "@codexboard/contracts";
 import { execFile as execFileCallback } from "node:child_process";
 import { lookup, resolve4, resolve6, resolveCname } from "node:dns/promises";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { ensurePrivateDirectorySync, ensurePrivateFileSync } from "#private-file-permissions";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { createConnection, isIP } from "node:net";
@@ -303,8 +304,11 @@ export async function runSetupChecks(input, options = {}) {
       try {
         if (!input.frpcBinary) throw new Error("Missing frpc executable");
         directory = await mkdtemp(join(tmpdir(), "codexboard-setup-check-"));
+        ensurePrivateDirectorySync(directory);
         const file = join(directory, "frpc.toml");
-        await writeFile(file, input.frpc, { mode: 0o600, flag: "wx" });
+        await writeFile(file, "", { mode: 0o600, flag: "wx" });
+        ensurePrivateFileSync(file);
+        await writeFile(file, input.frpc);
         await command(input.frpcBinary, ["verify", "-c", file]);
         emit(
           "tunnel.verify",

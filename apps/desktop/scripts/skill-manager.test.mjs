@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -18,6 +19,24 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { createSkillManager } from "./skill-manager.mjs";
+import { assertPrivateFileSync, assertPrivateDirectorySync } from "#private-file-permissions";
+
+const WINDOWS = process.platform === "win32";
+const WRAPPER = WINDOWS ? "scripts/taskctl.ps1" : "scripts/taskctl.sh";
+function icacls(path, ...args) {
+  const result = spawnSync("icacls.exe", [path, ...args], { encoding: "utf8", windowsHide: true });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+}
+function weakenPermissions(path, posixMode) {
+  if (WINDOWS) icacls(path, "/grant", "*S-1-1-0:(R)");
+  else chmodSync(path, posixMode);
+}
+function assertWindowsPreserved(f, result, body) {
+  assert.equal(result.status, "error");
+  assert.match(result.message, /Windows.*原子替换/);
+  assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), body);
+  assert.deepEqual(f.staging(), []);
+}
 
 const NAME = "manage-codexboard";
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -42,7 +61,7 @@ function fixture(t, overrides = {}) {
   function bundled(version = "0.1.1", body = "# Test Skill\n") {
     const files = [
       { path: "SKILL.md", mode: 0o644, body },
-      { path: "scripts/taskctl.sh", mode: 0o755, body: "#!/bin/sh\nexit 0\n" },
+      { path: WRAPPER, mode: 0o755, body: "#!/bin/sh\nexit 0\n" },
     ];
     for (const file of files) write(join(source, file.path), file.body, file.mode);
     write(
@@ -131,9 +150,15 @@ test("status is read-only and explicit install writes verified files with requir
   assert.equal(installed.bundledRevision, initial.bundledRevision);
   assert.match(installed.message, /Codex 技能列表/);
   assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "# Test Skill\n");
-  assert.equal(lstatSync(join(f.target, "scripts/taskctl.sh")).mode & 0o777, 0o755);
-  assert.equal(lstatSync(join(f.target, "SKILL.md")).mode & 0o777, 0o644);
-  assert.equal(lstatSync(f.stateFile).mode & 0o777, 0o600);
+  if (WINDOWS) {
+    assertPrivateDirectorySync(f.target);
+    for (const path of [join(f.target, WRAPPER), join(f.target, "SKILL.md"), f.stateFile])
+      assertPrivateFileSync(path);
+  } else {
+    assert.equal(lstatSync(join(f.target, WRAPPER)).mode & 0o777, 0o755);
+    assert.equal(lstatSync(join(f.target, "SKILL.md")).mode & 0o777, 0o644);
+    assert.equal(lstatSync(f.stateFile).mode & 0o777, 0o600);
+  }
   assert.deepEqual(f.staging(), []);
 });
 
@@ -182,7 +207,7 @@ test("unknown existing directories require explicit replacement and their fresh 
   const before = f.manager.status();
   assert.equal(before.status, "modified");
   assert.equal(before.canInstall, false);
-  assert.equal(before.canReplace, true);
+  assert.equal(before.canReplace, !WINDOWS);
   assert.equal(
     (await f.manager.install({ expectedFingerprint: before.fingerprint })).status,
     "error",
@@ -197,6 +222,11 @@ test("unknown existing directories require explicit replacement and their fresh 
     replaceModified: true,
     expectedFingerprint: before.fingerprint,
   });
+  if (WINDOWS) {
+    assertWindowsPreserved(f, result, "custom skill");
+    assert.equal(readFileSync(join(f.target, "notes.txt"), "utf8"), "custom notes");
+    return;
+  }
   assert.equal(result.status, "current");
   assert.equal(existsSync(join(f.target, "notes.txt")), false);
   assert.deepEqual(f.staging(), []);
@@ -205,10 +235,10 @@ test("unknown existing directories require explicit replacement and their fresh 
 test("actual content, modes, extra entries and a rewritten receipt each make owned skills modified", async (t) => {
   for (const mutate of [
     (f) => write(join(f.target, "SKILL.md"), "user edit"),
-    (f) => chmodSync(join(f.target, "scripts/taskctl.sh"), 0o644),
+    (f) => weakenPermissions(join(f.target, WRAPPER), 0o644),
     (f) => write(join(f.target, "extra.txt"), "extra"),
     (f) => mkdirSync(join(f.target, "extra-directory")),
-    (f) => chmodSync(join(f.target, "scripts"), 0o755),
+    (f) => weakenPermissions(join(f.target, "scripts"), 0o755),
     (f) => write(join(f.target, ".codexboard-skill.json"), "{}"),
     (f) => {
       write(join(f.target, "SKILL.md"), "user edit");
@@ -222,7 +252,7 @@ test("actual content, modes, extra entries and a rewritten receipt each make own
     assert.equal((await f.manager.install()).status, "current");
     mutate(f);
     assert.equal(f.manager.status().status, "modified");
-    assert.equal(f.manager.status().canReplace, true);
+    assert.equal(f.manager.status().canReplace, !WINDOWS);
   }
 });
 
@@ -238,6 +268,11 @@ test("new bundled versions are offered without writing and update only after a f
   assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "# Test Skill\n");
   assert.equal((await f.manager.install()).status, "error");
   const result = await f.manager.install({ expectedFingerprint: status.fingerprint });
+  if (WINDOWS) {
+    assertWindowsPreserved(f, result, "# Test Skill\n");
+    assert.equal(f.manager.status().status, "updateAvailable");
+    return;
+  }
   assert.equal(result.status, "current");
   assert.equal(result.installedVersion, "0.1.2");
   assert.equal(result.updateAvailable, false);
@@ -257,7 +292,7 @@ test("same-version bundle changes are updates to untouched installations and req
   const status = f.manager.status();
   assert.equal(status.status, "updateAvailable");
   assert.equal(status.updateAvailable, true);
-  assert.equal(status.canInstall, true);
+  assert.equal(status.canInstall, !WINDOWS);
   assert.equal(status.canReplace, false);
   assert.equal(status.installedVersion, "0.1.1");
   assert.notEqual(status.bundledRevision, installed.bundledRevision);
@@ -266,6 +301,11 @@ test("same-version bundle changes are updates to untouched installations and req
   assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "# Test Skill\n");
   assert.equal((await f.manager.install()).status, "error");
   const result = await f.manager.install({ expectedFingerprint: status.fingerprint });
+  if (WINDOWS) {
+    assertWindowsPreserved(f, result, "# Test Skill\n");
+    assert.equal(f.manager.status().status, "updateAvailable");
+    return;
+  }
   assert.equal(result.status, "current");
   assert.equal(result.updateAvailable, false);
   assert.equal(result.bundledRevision, status.bundledRevision);
@@ -286,7 +326,7 @@ test("trusted receipts announce updated bundles while protecting locally modifie
     assert.equal(status.installedVersion, "0.1.1");
     assert.equal(status.updateAvailable, true);
     assert.equal(status.canInstall, false);
-    assert.equal(status.canReplace, true);
+    assert.equal(status.canReplace, !WINDOWS);
     assert.equal(
       (await f.manager.install({ expectedFingerprint: status.fingerprint })).status,
       "error",
@@ -296,6 +336,10 @@ test("trusted receipts announce updated bundles while protecting locally modifie
       expectedFingerprint: status.fingerprint,
       replaceModified: true,
     });
+    if (WINDOWS) {
+      assertWindowsPreserved(f, result, "personal instructions\n");
+      continue;
+    }
     assert.equal(result.status, "current");
     assert.equal(result.updateAvailable, false);
     assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "new bundled instructions\n");
@@ -345,8 +389,8 @@ test("bundle revisions depend on normalized file content and modes, not filesyst
   manifest.files.reverse();
   write(second.manifestFile, JSON.stringify(manifest, null, 2));
   assert.equal(second.manager.status().bundledRevision, original);
-  chmodSync(join(second.source, "scripts/taskctl.sh"), 0o644);
-  manifest.files.find((file) => file.path === "scripts/taskctl.sh").mode = 0o644;
+  chmodSync(join(second.source, WRAPPER), 0o644);
+  manifest.files.find((file) => file.path === WRAPPER).mode = 0o644;
   write(second.manifestFile, JSON.stringify(manifest));
   assert.notEqual(second.manager.status().bundledRevision, original);
   second.bundled("0.1.1", "changed content\n");
@@ -376,10 +420,10 @@ test("a managed installed tree cannot claim an available update or be followed a
 
 test("links, special paths and manager markers cannot be replaced even with confirmation", async (t) => {
   for (const setup of [
-    (f, outside) => symlinkSync(outside, join(f.home, ".agents")),
+    (f, outside) => symlinkSync(outside, join(f.home, ".agents"), "junction"),
     (f, outside) => {
       mkdirSync(dirname(f.target), { recursive: true });
-      symlinkSync(outside, f.target);
+      symlinkSync(outside, f.target, "junction");
     },
     (f, outside) => {
       mkdirSync(f.target, { recursive: true });
@@ -410,7 +454,7 @@ test("either default or configured legacy Codex skill location prevents duplicat
     const root = custom ? join(f.directory, "custom-codex") : join(f.home, ".codex");
     const legacy = join(root, "skills", NAME);
     mkdirSync(dirname(legacy), { recursive: true });
-    symlinkSync(join(f.directory, "missing-managed-skill"), legacy);
+    symlinkSync(join(f.directory, "missing-managed-skill"), legacy, "junction");
     const manager = f.managerWith({ codexHome: custom ? root : "relative-ignored" });
     assert.equal(manager.status().status, "managed");
     assert.match(manager.status().message, /旧技能目录/);
@@ -421,7 +465,7 @@ test("either default or configured legacy Codex skill location prevents duplicat
 
 test("target changes immediately before commit reject the stale confirmation", async (t) => {
   const f = fixture(t);
-  write(join(f.target, "SKILL.md"), "first edit");
+  if (!WINDOWS) write(join(f.target, "SKILL.md"), "first edit");
   const before = f.manager.status();
   const manager = f.managerWith({
     beforeCommit: () => write(join(f.target, "SKILL.md"), "concurrent edit"),
@@ -478,7 +522,7 @@ test("a legacy receipt owner at the renamed target remains protected as modified
 
 test("failed native commit preserves old content and removes only this operation staging", async (t) => {
   const f = fixture(t);
-  write(join(f.target, "SKILL.md"), "original");
+  if (!WINDOWS) write(join(f.target, "SKILL.md"), "original");
   const manager = f.managerWith({
     commitDirectories: () => {
       throw new Error("synthetic failure with private data");
@@ -490,13 +534,14 @@ test("failed native commit preserves old content and removes only this operation
   });
   assert.equal(result.status, "error");
   assert.doesNotMatch(result.message, /private data/);
-  assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "original");
+  if (WINDOWS) assert.equal(existsSync(f.target), false);
+  else assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "original");
   assert.equal(existsSync(f.stateFile), false);
   assert.deepEqual(f.staging(), []);
 });
 
 test("metadata commit failure reverses both initial install and directory replacement", async (t) => {
-  for (const existing of [false, true]) {
+  for (const existing of WINDOWS ? [false] : [false, true]) {
     const f = fixture(t);
     if (existing) await f.manager.install();
     const previousState = existing ? readFileSync(f.stateFile) : null;
@@ -522,7 +567,7 @@ test("metadata commit failure reverses both initial install and directory replac
 });
 
 test("a lost acknowledgement after directory commit preserves original staging and reports uncertainty", async (t) => {
-  for (const existing of [false, true]) {
+  for (const existing of WINDOWS ? [false] : [false, true]) {
     const f = fixture(t);
     if (existing) write(join(f.target, "personal.txt"), "synthetic original contents");
     const manager = f.managerWith({
@@ -552,7 +597,7 @@ test("a lost acknowledgement after directory commit preserves original staging a
 
 test("rollback never treats a concurrently substituted target as the newly installed directory", async (t) => {
   const f = fixture(t);
-  write(join(f.target, "personal.txt"), "synthetic original contents");
+  if (!WINDOWS) write(join(f.target, "personal.txt"), "synthetic original contents");
   const installed = join(f.directory, "concurrently-moved-install");
   const manager = f.managerWith({
     commitDirectories: (request) => {
@@ -571,11 +616,14 @@ test("rollback never treats a concurrently substituted target as the newly insta
     readFileSync(join(f.target, "external.txt"), "utf8"),
     "keep concurrent synthetic contents",
   );
-  assert.equal(f.staging().length, 1);
-  assert.equal(
-    readFileSync(join(dirname(f.target), f.staging()[0], "personal.txt"), "utf8"),
-    "synthetic original contents",
-  );
+  if (WINDOWS) assert.deepEqual(f.staging(), []);
+  else {
+    assert.equal(f.staging().length, 1);
+    assert.equal(
+      readFileSync(join(dirname(f.target), f.staging()[0], "personal.txt"), "utf8"),
+      "synthetic original contents",
+    );
+  }
   assert.equal(readFileSync(join(installed, "SKILL.md"), "utf8"), "# Test Skill\n");
 });
 
@@ -624,7 +672,10 @@ test("missing or corrupt independent installation records cannot authorize autom
     replaceModified: true,
     expectedFingerprint: f.manager.status().fingerprint,
   });
-  assert.equal(result.status, "current");
+  if (WINDOWS) {
+    assertWindowsPreserved(f, result, "# Test Skill\n");
+    assert.equal(readFileSync(f.stateFile, "utf8"), "not-json");
+  } else assert.equal(result.status, "current");
   rmSync(f.stateFile);
   assert.equal(f.manager.status().status, "modified");
 });
@@ -646,12 +697,18 @@ test(
   { skip: process.getuid?.() === 0 },
   async (t) => {
     const f = fixture(t);
-    write(join(f.target, "SKILL.md"), "private synthetic text", 0o000);
+    const path = join(f.target, "SKILL.md");
+    write(path, "private synthetic text", WINDOWS ? 0o644 : 0o000);
+    if (WINDOWS) icacls(path, "/deny", "*S-1-1-0:(R)");
+    t.after(() => {
+      if (WINDOWS && existsSync(path)) icacls(path, "/remove:d", "*S-1-1-0");
+    });
     const result = f.manager.status();
     assert.equal(result.status, "error");
     assert.match(result.message, /权限/);
     assert.equal((await f.manager.install()).status, "error");
-    chmodSync(join(f.target, "SKILL.md"), 0o644);
+    if (WINDOWS) icacls(path, "/remove:d", "*S-1-1-0");
+    else chmodSync(path, 0o644);
     assert.equal(readFileSync(join(f.target, "SKILL.md"), "utf8"), "private synthetic text");
   },
 );

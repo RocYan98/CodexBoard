@@ -479,12 +479,16 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
 it("uses executor-visible paths for attachments when the server runs in Docker", () => {
   const s = setup();
   const attachment = s.upload();
+  const executorDataDirectory =
+    process.platform === "win32"
+      ? "C:\\Users\\example\\AppData\\Local\\Taskboard\\data"
+      : "/Users/example/Library/Application Support/Taskboard/data";
   const queue = new ExecutionQueue({
     database: s.database,
     dataDirectory: "/var/lib/codexboard",
     executorNodePath: "/opt/homebrew/bin/node",
     executorTaskctlPath: "/Users/example/Task Board/packages/taskctl/dist/cli.js",
-    executorDataDirectory: "/Users/example/Library/Application Support/Taskboard/data",
+    executorDataDirectory,
   });
   queue.submit(
     {
@@ -499,9 +503,7 @@ it("uses executor-visible paths for attachments when the server runs in Docker",
   expect(prompt).toContain(
     "'/opt/homebrew/bin/node' '/Users/example/Task Board/packages/taskctl/dist/cli.js'",
   );
-  expect(prompt).toContain(
-    "CODEXBOARD_DATA_DIR='/Users/example/Library/Application Support/Taskboard/data'",
-  );
+  expect(prompt).toContain(`CODEXBOARD_DATA_DIR='${executorDataDirectory}'`);
   expect(queue.listTaskJobs(s.task.id)[0]!.workContext.attachmentSnapshot).toEqual([
     expect.objectContaining({ originalAttachmentId: attachment.id }),
   ]);

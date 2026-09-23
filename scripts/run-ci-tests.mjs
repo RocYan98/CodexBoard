@@ -134,7 +134,13 @@ function xmlEscape(value) {
 // Options are only for isolated runner tests; the CLI always uses this checkout and Node.
 export async function runSuite(
   suite,
-  { rootDirectory = projectRoot, nodeExecutable = process.execPath, testTimeoutMs = 120_000 } = {},
+  {
+    rootDirectory = projectRoot,
+    nodeExecutable = process.execPath,
+    // Desktop Skill cases perform real Windows ACL checks in isolated PowerShell
+    // processes. Keep a bounded file budget without disabling those checks.
+    testTimeoutMs = process.platform === "win32" && suite === "desktop-scripts" ? 300_000 : 120_000,
+  } = {},
 ) {
   if (!Object.hasOwn(suites, suite)) throw new Error(`Unknown test suite: ${suite}`);
   rootDirectory = resolve(rootDirectory);

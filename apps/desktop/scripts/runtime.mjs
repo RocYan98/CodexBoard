@@ -148,18 +148,35 @@ export async function assertPortsFree(ports) {
       server.listen(port, "127.0.0.1", () => server.close(ok));
     });
 }
-export async function stopChildren(children, graceMs = 12000) {
+export async function stopChildren(children, graceMs = 12000, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const spawnKiller = options.spawnKiller ?? spawn;
+  const killWaitMs = options.killWaitMs ?? 5000;
   const signal = (child, sig) => {
     if (child.exitCode !== null || child.signalCode) return;
-    if (process.platform === "win32") {
+    if (platform === "win32") {
       if (sig === "SIGTERM" && child.connected) {
-        child.send({ type: "codexboard.shutdown" }, () => {});
+        try {
+          child.send({ type: "codexboard.shutdown" }, () => {});
+        } catch {
+          /* The force timer handles a concurrently closed IPC channel. */
+        }
       } else {
-        const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+        const fallback = () => {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            /* Final wait reports failure. */
+          }
+        };
+        const killer = spawnKiller("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
           stdio: "ignore",
           windowsHide: true,
         });
-        killer.on("error", () => child.kill());
+        killer.once("error", fallback);
+        killer.once("exit", (code) => {
+          if (code !== 0) fallback();
+        });
       }
       return;
     }
@@ -176,11 +193,16 @@ export async function stopChildren(children, graceMs = 12000) {
   await Promise.all(
     children.map(
       (child) =>
-        new Promise((done) => {
+        new Promise((done, reject) => {
           if (child.exitCode !== null || child.signalCode) return done();
           const timer = setTimeout(() => signal(child, "SIGKILL"), graceMs);
+          const deadline = setTimeout(
+            () => reject(new Error("后台服务未能在限定时间内退出，请检查进程状态后重试")),
+            graceMs + killWaitMs,
+          );
           child.once("close", () => {
             clearTimeout(timer);
+            clearTimeout(deadline);
             done();
           });
           signal(child, "SIGTERM");
@@ -696,7 +718,15 @@ async function main() {
     publish();
     const owned = children;
     children = [];
-    await stopChildren(owned);
+    try {
+      await stopChildren(owned);
+    } catch (error) {
+      children = owned.filter((child) => child.exitCode === null && !child.signalCode);
+      state.phase = "error";
+      state.message = error.message;
+      publish();
+      throw error;
+    }
     state.phase = "stopped";
     state.message = "服务已停止";
     state.services = state.services.map((s) => ({ ...s, status: "stopped" }));

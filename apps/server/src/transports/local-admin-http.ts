@@ -3,7 +3,7 @@ import { CliAuthService, cliAuthOperation } from "../modules/identity/cli-auth-s
 import { identityKey, sameIdentity } from "@codexboard/contracts";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
   ArchiveTaskCommandSchema,
@@ -81,12 +81,7 @@ const AttachmentParamsSchema = z.object({ attachmentId: EntityIdSchema });
 const AttachmentDownloadQuerySchema = z.object({ preview: z.literal("1").optional() });
 const JobParamsSchema = z.object({ jobId: EntityIdSchema });
 const InteractionParamsSchema = z.object({ interactionId: EntityIdSchema });
-const TaskctlCwdHeaderSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(4_096)
-  .refine((value) => value.startsWith("/"));
+const TaskctlCwdHeaderSchema = z.string().trim().min(1).max(4_096).refine(isAbsolute);
 const TaskctlCwdWireHeaderSchema = z.string().trim().min(1).max(12_288);
 
 interface CreateLocalAdminAppOptions {
@@ -583,7 +578,9 @@ export function createLocalAdminApp(options: CreateLocalAdminAppOptions): Fastif
         .filter((candidate) => {
           return candidate.rootPaths.some((root) => {
             const path = relative(root, cwd);
-            return path === "" || (!path.startsWith(`..${sep}`) && path !== "..");
+            return (
+              path === "" || (!isAbsolute(path) && !path.startsWith(`..${sep}`) && path !== "..")
+            );
           });
         })
         .sort(

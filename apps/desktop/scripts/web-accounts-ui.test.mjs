@@ -55,6 +55,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
       assert.equal(await page.locator("#web-username").isVisible(), false);
       assert.equal(await page.locator("#skill-status").isVisible(), false);
       await page.locator('[data-tab="connections"]').click();
+      await page.locator("#connections-card > summary").click();
       await page.locator("#connections-web-accounts").click();
       assert.equal(await page.locator("#web-username").isVisible(), true);
       assert.equal(await page.evaluate(() => document.activeElement.id), "web-username");

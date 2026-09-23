@@ -73,9 +73,10 @@ test(
       ensurePrivateFileSync(file);
       const script = String.raw`
 $ErrorActionPreference='Stop'
+[Console]::InputEncoding=New-Object System.Text.UTF8Encoding($false)
 $path=[Console]::In.ReadToEnd()
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$acl=Get-Acl -LiteralPath $path
+$acl=[IO.File]::GetAccessControl($path)
 $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | ForEach-Object { @{ sid=$_.IdentityReference.Value; inherited=$_.IsInherited; type=$_.AccessControlType.ToString() } })
 @{ sid=$sid; owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; protected=$acl.AreAccessRulesProtected; rules=$rules } | ConvertTo-Json -Depth 4 -Compress
 `;
@@ -96,7 +97,7 @@ $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]
         ],
         { input: file, encoding: "utf8", timeout: 20_000, windowsHide: true },
       );
-      assert.equal(result.status, 0);
+      assert.equal(result.status, 0, result.error?.message ?? result.stderr);
       const acl = JSON.parse(result.stdout);
       assert.equal(acl.owner, acl.sid);
       assert.equal(acl.protected, true);

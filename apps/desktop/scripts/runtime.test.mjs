@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseEnv, nativeEnvironment, assertPortsFree, stopChildren } from "./runtime.mjs";
 import net from "node:net";
+import { EventEmitter } from "node:events";
 import { join, resolve } from "node:path";
 import { runtimeBinary, runtimeEnvironment } from "./runtime.mjs";
 test("configured ports reach the backend, admin listener and embedded bridge", () => {
@@ -326,6 +327,40 @@ test("Windows runtime keeps executable suffixes, path delimiters and necessary O
   assert.equal(env.SystemRoot, "C:\\Windows");
   assert.equal(env.USERPROFILE, "C:\\Users\\test");
   assert.equal(env.PRIVATE_SECRET, undefined);
+});
+
+test("Windows taskkill failure falls back to the owned child and a missing close is bounded", async () => {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 42,
+    exitCode: null,
+    signalCode: null,
+    connected: false,
+  });
+  const commands = [];
+  const spawnKiller = (program, args) => {
+    commands.push([program, args]);
+    const killer = new EventEmitter();
+    queueMicrotask(() => killer.emit("exit", 1));
+    return killer;
+  };
+  child.kill = (signal) => {
+    assert.equal(signal, "SIGKILL");
+    child.signalCode = signal;
+    child.emit("close");
+  };
+  await stopChildren([child], 10, { platform: "win32", spawnKiller, killWaitMs: 30 });
+  assert.deepEqual(commands, [["taskkill.exe", ["/PID", "42", "/T", "/F"]]]);
+  const stuck = Object.assign(new EventEmitter(), {
+    pid: 43,
+    exitCode: null,
+    signalCode: null,
+    connected: false,
+    kill: () => false,
+  });
+  await assert.rejects(
+    stopChildren([stuck], 10, { platform: "win32", spawnKiller, killWaitMs: 30 }),
+    /限定时间/,
+  );
 });
 
 test(

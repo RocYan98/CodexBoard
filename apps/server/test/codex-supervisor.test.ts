@@ -92,7 +92,7 @@ describe("Codex App Server supervisor", () => {
     expect(spawnProcess).toHaveBeenCalledWith(
       process.execPath,
       [
-        expect.stringContaining("scripts/codex-session-bridge.mjs"),
+        expect.stringContaining(join("scripts", "codex-session-bridge.mjs")),
         "--codex",
         "codex",
         "--listen",

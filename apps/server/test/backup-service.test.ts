@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -38,8 +39,10 @@ afterEach(() => {
 });
 
 function temporaryDirectory(): string {
-  const directory = mkdtempSync(
-    join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "codexboard-backup-"),
+  const directory = realpathSync.native(
+    mkdtempSync(
+      join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "codexboard-backup-"),
+    ),
   );
   temporaryDirectories.push(directory);
   return directory;
@@ -440,7 +443,8 @@ describe("BackupService", () => {
     const events: string[] = [];
 
     finalizeRestoreJournal(dataDirectory, {
-      syncPath: (path) => events.push(`sync:${path.slice(dataDirectory.length) || "/"}`),
+      syncPath: (path) =>
+        events.push(`sync:${path.slice(dataDirectory.length).replaceAll("\\", "/") || "/"}`),
       markCommitted: () => events.push("committed"),
     });
 
@@ -473,11 +477,12 @@ describe("BackupService", () => {
     await BackupService.restore(source, dataDirectory, {
       renamePath: (from, to) => {
         events.push(
-          `rename:${from.slice(dataDirectory.length)}->${to.slice(dataDirectory.length)}`,
+          `rename:${from.slice(dataDirectory.length).replaceAll("\\", "/")}->${to.slice(dataDirectory.length).replaceAll("\\", "/")}`,
         );
         renameSync(from, to);
       },
-      syncPath: (path) => events.push(`sync:${path.slice(dataDirectory.length) || "/"}`),
+      syncPath: (path) =>
+        events.push(`sync:${path.slice(dataDirectory.length).replaceAll("\\", "/") || "/"}`),
     });
 
     const rollbackDatabaseRename = events.findIndex(
@@ -521,7 +526,8 @@ describe("BackupService", () => {
     const events: string[] = [];
 
     recoverInterruptedRestore(dataDirectory, {
-      syncPath: (path) => events.push(`sync:${path.slice(dataDirectory.length) || "/"}`),
+      syncPath: (path) =>
+        events.push(`sync:${path.slice(dataDirectory.length).replaceAll("\\", "/") || "/"}`),
       beforeCleanup: () => events.push("cleanup"),
     });
 
@@ -595,7 +601,7 @@ describe("BackupService", () => {
 
     // Other test workers also validate backups. Isolate this synchronous call
     // instead of comparing a shared tmp directory that those workers may clean.
-    vi.stubEnv("TMPDIR", inspectionRoot);
+    vi.stubEnv(process.platform === "win32" ? "TEMP" : "TMPDIR", inspectionRoot);
     try {
       expect(() => BackupService.verify(backupDirectory)).toThrow(/file is not a database/);
       expect(readdirSync(inspectionRoot)).toEqual([]);

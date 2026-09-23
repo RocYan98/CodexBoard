@@ -461,6 +461,32 @@
           "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09"
         }
       ]
+    },
+    "webview2-com-sys@0.38.2": {
+      "repository": "https://github.com/wravery/webview2-rs",
+      "commit": "b74dc5e2b394044bea5191052868ce7a106c202c",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "destination": "LICENSE",
+          "source": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+        }
+      ]
+    },
+    "webview2-com@0.38.2": {
+      "repository": "https://github.com/wravery/webview2-rs",
+      "commit": "b74dc5e2b394044bea5191052868ce7a106c202c",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "destination": "LICENSE",
+          "source": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+        }
+      ]
     }
   }
 }

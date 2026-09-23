@@ -36,7 +36,9 @@ export type RestoreJournal = z.infer<typeof RestoreJournalSchema>;
 export function syncDurablePath(path: string): void {
   // Windows cannot open/fsync directories; regular-file flush failures remain fatal.
   if (process.platform === "win32" && lstatSync(path).isDirectory()) return;
-  const descriptor = openSync(path, "r");
+  // FlushFileBuffers requires GENERIC_WRITE on Windows. r+ grants it without
+  // truncating the existing payload; POSIX can fsync a read-only descriptor.
+  const descriptor = openSync(path, process.platform === "win32" ? "r+" : "r");
   try {
     fsyncSync(descriptor);
   } finally {

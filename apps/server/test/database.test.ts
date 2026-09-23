@@ -1,5 +1,13 @@
 import { assertPrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
-import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -755,7 +763,14 @@ describe("SQLite foundation", () => {
   });
 
   it("creates a consistent pre-migration backup before upgrading an existing database", async () => {
-    const directory = mkdtempSync(join("/private/tmp", "codexboard-migration-backup-"));
+    const directory = realpathSync.native(
+      mkdtempSync(
+        join(
+          process.platform === "darwin" ? "/private/tmp" : tmpdir(),
+          "codexboard-migration-backup-",
+        ),
+      ),
+    );
     temporaryDirectories.push(directory);
     const database = track(openDatabase(join(directory, "taskboard.sqlite")));
     runMigrations(database, CORE_MIGRATIONS.slice(0, 4));
@@ -922,7 +937,14 @@ describe("SQLite foundation", () => {
   });
 
   it("does not start a migration until its pre-migration backup is durably published", async () => {
-    const directory = mkdtempSync(join("/private/tmp", "codexboard-migration-order-"));
+    const directory = realpathSync.native(
+      mkdtempSync(
+        join(
+          process.platform === "darwin" ? "/private/tmp" : tmpdir(),
+          "codexboard-migration-order-",
+        ),
+      ),
+    );
     temporaryDirectories.push(directory);
     const events: string[] = [];
     const database = track(
@@ -941,7 +963,8 @@ describe("SQLite foundation", () => {
       database,
       dataDirectory: directory,
       durabilityHooks: {
-        syncPath: (path) => events.push(`sync:${path.slice(directory.length) || "/"}`),
+        syncPath: (path) =>
+          events.push(`sync:${path.slice(directory.length).replaceAll("\\", "/") || "/"}`),
       },
     });
 

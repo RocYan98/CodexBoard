@@ -140,3 +140,33 @@ test("Cargo fails without silently updating a stale lockfile", (t) => {
   assert.deepEqual(readFileSync(join(root, "Cargo.lock")), previous);
   assert.equal(existsSync(join(runtime, "licenses/cargo")), false);
 });
+
+test("Windows Cargo runtime includes exact WebView2 license supplements", (t) => {
+  const { project, root, runtime, lock } = fixture(t);
+  write(
+    join(root, "deps/windows/Cargo.toml"),
+    '[package]\nname = "webview2-com-sys"\nversion = "0.38.2"\nedition = "2021"\nlicense = "MIT"\nrepository = "https://github.com/wravery/webview2-rs"\n',
+  );
+  const manifest = join(root, "Cargo.toml");
+  write(manifest, readFileSync(manifest, "utf8").replace("windows-only =", "webview2-com-sys ="));
+  const vcs = join(root, "deps/windows/.cargo_vcs_info.json");
+  write(vcs, JSON.stringify({ git: { sha1: "b74dc5e2b394044bea5191052868ce7a106c202c" } }));
+  lock();
+  assert.deepEqual(copyCargoLicenses(project, runtime, "x86_64-pc-windows-msvc"), {
+    packageCount: 3,
+    fileCount: 4,
+  });
+  const index = JSON.parse(readFileSync(join(runtime, "licenses/cargo/index.json"), "utf8"));
+  assert.equal(index.target, "x86_64-pc-windows-msvc");
+  const entry = index.packages.find((crate) => crate.name === "webview2-com-sys");
+  assert.equal(entry.supplemented, true);
+  assert.equal(
+    entry.files[0].sha256,
+    "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+  );
+  write(vcs, JSON.stringify({ git: { sha1: "0".repeat(40) } }));
+  assert.throws(
+    () => copyCargoLicenses(project, runtime, "x86_64-pc-windows-msvc"),
+    /缺少对应版本的 Cargo 许可正文：webview2-com-sys@0\.38\.2/,
+  );
+});

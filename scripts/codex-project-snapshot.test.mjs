@@ -63,10 +63,13 @@ function fixture() {
   return { directory, stateFile, snapshotFile };
 }
 
-async function waitFor(check, timeoutMs = 1_000) {
+async function waitFor(check, timeoutMs = process.platform === "win32" ? 10_000 : 1_000) {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  // Windows ACL validation starts PowerShell synchronously. Check the result
+  // after its callback has returned, even when that callback crossed a deadline.
+  for (;;) {
     if (check()) return;
+    if (Date.now() >= deadline) break;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
   assert.fail("等待 Codex 项目快照更新超时");

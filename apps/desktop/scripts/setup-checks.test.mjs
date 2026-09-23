@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { requestJson, runSetupChecks } from "./setup-checks.mjs";
+import { assertPrivateFileSync } from "#private-file-permissions";
 
 const secret = "synthetic-app-secret-never-display";
 const token = "synthetic-frpc-token-never-display";
@@ -185,7 +186,8 @@ test("tunnel verify uses a private temporary file, cleans it, and probes only ne
         assert.deepEqual(args.slice(0, 2), ["verify", "-c"]);
         file = args[2];
         assert.equal(readFileSync(file, "utf8"), frpc);
-        assert.equal(statSync(file).mode & 0o777, 0o600);
+        assertPrivateFileSync(file);
+        if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
         assert.ok(options.timeout > 0);
         assert.ok(options.maxBuffer > 0);
         return { stdout: `${secret} ${token}`, stderr: "" };
