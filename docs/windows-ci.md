@@ -352,3 +352,28 @@ Mac 安装包位于 `~/Downloads/CodexBoard-Windows-Test-6f256a8/`，无影位�
 同一提交的 [Actions 运行 35814478656](https://github.com/RocYan98/CodexBoard/actions/runs/35814478656) 整体仍为 **failure**。contracts、taskctl、server、web、scripts 五组通过；desktop-scripts 为 246 项中 233 通过、1 失败、12 跳过，失败发生在 `server-smoke.test.mjs` 测试进程，原生退出码为 `3221226505`（`0xC0000409`）。安装作业的随包后台冒烟检查另报 `SMOKE_BACKEND_EXITED: CONFIG_INVALID,EXIT_1`，未产出本轮可验收的新安装包。两个 CI 失败均保留，继续修复；无影隔离冒烟通过不替代 CI 失败的解决。
 
 最新 DNS 查询中，`test.rocyan.cn` 的 A 记录为 `101.133.133.237`，HTTPS 仍未就绪。本轮已确认临时修复后的本机后台健康与未授权访问边界；新安装包覆盖安装、无临时替换的启动及配置后复验仍待完成。Codex 在线登录有效性、真实 Web/飞书登录、CLI 用户配对及业务任务执行均未验证，不能据此认定 Windows 适配已全部完成。
+
+### Windows 隔离环境与中文目录复制的进一步诊断
+
+提交 `36aac4c7d15ad5caec501bb33cdaa7db85f5a2c9` 的 [Actions 运行 35816268259](https://github.com/RocYan98/CodexBoard/actions/runs/35816268259) 仍为 **failure**。六组报告合计 1352 项：1337 通过、1 失败、14 跳过。唯一测试失败在 desktop-scripts 的打包冒烟夹具，最后阶段为 `workspace-copy`，尚未开始后台启动；测试进程以 `3221226505`（`0xC0000409`）退出。安装作业则保留了 `CONFIG_INVALID`、`CODEXBOARD_CODEX_TOKEN_FILE`、`ACL_FAILED` 诊断，继续定位隔离子进程中的 ACL 检查。
+
+安装作业在相同隔离目录和文件上进行两因素对照：是否补充固定系统环境字段并设置仅含系统安装目录的 `PSModulePath`，以及是否预建隔离 profile 目录。四种环境中的 PowerShell 基础启动均成功；ACL 读取结果如下：
+
+| 系统环境与系统模块路径 | 预建 profile 目录 | ACL 读取结果                       |
+| ---------------------- | ----------------- | ---------------------------------- |
+| 未补充                 | 否                | 20029 ms 后超时，`ETIMEDOUT`。     |
+| 已补充                 | 否                | 302 ms，标记 `PRIVATE`，退出码 0。 |
+| 未补充                 | 是                | 20024 ms 后超时，`ETIMEDOUT`。     |
+| 已补充                 | 是                | 275 ms，标记 `PRIVATE`，退出码 0。 |
+
+该对照确认本轮隔离环境中的 ACL 超时可由系统环境与系统模块路径组合修复，单独创建 profile 目录不能解决。系统模块路径没有继承用户自定义 `PSModulePath`；该结果也未放宽当前用户专属 DACL 校验。
+
+另在无影 Node `22.23.2` 上复现：对含中文路径执行不带 `filter` 的递归 `cpSync`，可触发相同原生退出码；为复制增加始终返回 `true` 的 `filter` 后，完整 runtime 复制成功、退出码 0。这个过滤函数保留所有文件，只切换复制遍历路径，未排除文件或跳过冒烟测试。工作树据此修复 Windows 工作区包复制与 PowerShell 子进程环境；全部检查通过及新安装包实机复验仍待后续运行确认。
+
+公网检查随后看到 Caddy 日志 `certificate obtained successfully`。只读核对本机端口为 API `58978`、管理接口 `58979`、bridge `58980`、Caddy `58981` 后，在无影执行：
+
+```powershell
+curl.exe --noproxy '*' --resolve test.rocyan.cn:58981:127.0.0.1 https://test.rocyan.cn:58981/api/health
+```
+
+请求保留域名与 TLS SNI，只将目标解析到本机 Caddy；没有使用 `-k` 或绕过证书验证。响应为 `status: ok`、`service: codexboard-server`、`checks.http: ok`、`checks.sqlite: ok`，确认本机 Caddy 证书、TLS 和后台转发链路通过。公网 `443` 的同一健康接口仍在 Windows 与 Mac 两端发生 TLS 握手失败，Mac 禁用代理后也相同。当前故障范围已缩小到公网入口或隧道链路，尚未修复，不能将本机 HTTPS 成功记为公网验收通过。

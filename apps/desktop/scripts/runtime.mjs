@@ -3,6 +3,7 @@ import { readFrpcOrigin, isSupportedOrigin, readFrpcDnsTarget } from "./frpc-con
 import { DEFAULT_PORTS, readLocalPorts, savePorts } from "./ports.mjs";
 import { createSetupController, detectCodexPath } from "./setup-controller.mjs";
 import { nodeScriptArguments } from "#node-script-arguments";
+import { windowsSystemEnvironment } from "#windows-system-environment";
 import {
   ensurePrivateDirectorySync,
   ensurePrivateFileSync,
@@ -144,19 +145,8 @@ export function runtimeEnvironment(root, env = process.env, platform = process.p
       PATH: `${join(root, "bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
       LANG: "zh_CN.UTF-8",
     };
-  const values = {};
-  for (const key of [
-    "SystemRoot",
-    "WINDIR",
-    "COMSPEC",
-    "PATHEXT",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "TEMP",
-    "TMP",
-    "HOME",
-  ]) {
+  const values = windowsSystemEnvironment(env);
+  for (const key of ["USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "HOME"]) {
     const source = Object.keys(env).find(
       (candidate) => candidate.toLowerCase() === key.toLowerCase(),
     );

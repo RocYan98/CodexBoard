@@ -60,7 +60,12 @@ test(
       cpSync(
         join(runtimeRoot, "packages", name),
         join(runtimeRoot, "node_modules/@codexboard", name),
-        { recursive: true },
+        {
+          recursive: true,
+          // Node 22's native recursive fast path can abort on Windows Unicode
+          // directories (nodejs/node#59636). Keep every file via the JS path.
+          ...(process.platform === "win32" ? { filter: () => true } : {}),
+        },
       );
     onStage("smoke-start");
     const result = await smokePackagedServer({ runtimeRoot, nodePath, onStage });

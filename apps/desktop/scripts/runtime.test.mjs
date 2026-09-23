@@ -422,16 +422,30 @@ test("Windows runtime keeps executable suffixes, path delimiters and necessary O
     {
       Path: "C:\\Git\\cmd;C:\\Windows\\System32",
       SYSTEMROOT: "C:\\Windows",
+      SystemDrive: "C:",
+      ProgramFiles: "C:\\Program Files",
+      ProgramData: "C:\\ProgramData",
+      PSModulePath: "C:\\Users\\test\\untrusted-modules",
       USERPROFILE: "C:\\Users\\test",
       TEMP: "C:\\Temp",
       PRIVATE_SECRET: "do not forward",
+      NODE_OPTIONS: "--require=private-hook.js",
+      HTTP_PROXY: "http://private.invalid",
     },
     "win32",
   );
   assert.equal(env.PATH, "C:\\runtime\\bin;C:\\Git\\cmd;C:\\Windows\\System32");
   assert.equal(env.SystemRoot, "C:\\Windows");
   assert.equal(env.USERPROFILE, "C:\\Users\\test");
+  assert.equal(env.SystemDrive, "C:");
+  assert.equal(env.ProgramData, "C:\\ProgramData");
+  assert.equal(
+    env.PSModulePath,
+    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+  );
   assert.equal(env.PRIVATE_SECRET, undefined);
+  assert.equal(env.NODE_OPTIONS, undefined);
+  assert.equal(env.HTTP_PROXY, undefined);
 });
 
 test("Windows taskkill failure falls back to the owned child and a missing close is bounded", async () => {

@@ -120,6 +120,7 @@ export const RUNTIME_SCRIPT_FILES = Object.freeze([
   "node-script-arguments.mjs",
   "private-file-permissions.mjs",
   "run-codex-app-server.mjs",
+  "windows-system-environment.mjs",
 ]);
 
 // The native app starts runtime.mjs, which imports the remaining setup modules.

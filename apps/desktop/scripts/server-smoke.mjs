@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 import { ensurePrivateDirectorySync, ensurePrivateFileSync } from "#private-file-permissions";
 import { nodeScriptArguments } from "#node-script-arguments";
+import { windowsSystemEnvironment } from "#windows-system-environment";
 
 const host = "codexboard-smoke.invalid";
 const knownErrors = new Set([
@@ -226,11 +227,7 @@ export async function smokePackagedServer({
     );
     api = await reservePort();
     admin = await reservePort();
-    const env = {};
-    for (const name of ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT"]) {
-      const key = Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase());
-      if (key) env[name] = process.env[key];
-    }
+    const env = process.platform === "win32" ? windowsSystemEnvironment() : {};
     Object.assign(env, {
       HOME: home,
       USERPROFILE: home,

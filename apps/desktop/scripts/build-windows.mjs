@@ -121,6 +121,7 @@ export async function buildWindows() {
         "#private-file-permissions": "./scripts/private-file-permissions.mjs",
         "#codex-windows-app": "./scripts/codex-windows-app.mjs",
         "#node-script-arguments": "./scripts/node-script-arguments.mjs",
+        "#windows-system-environment": "./scripts/windows-system-environment.mjs",
       },
     }),
   );
@@ -130,6 +131,9 @@ export async function buildWindows() {
   for (const name of ["contracts", "taskctl"])
     cpSync(join(runtime, "packages", name), join(runtime, "node_modules/@codexboard", name), {
       recursive: true,
+      // Avoid Node 22's Windows Unicode recursive-copy native crash (#59636)
+      // while retaining every file through its JavaScript traversal.
+      filter: () => true,
     });
   await copyThirdPartyLicenses(project, runtime);
   run(
