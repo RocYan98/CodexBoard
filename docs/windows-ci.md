@@ -172,7 +172,7 @@ fb4745f5378c8a4122f74643a3c7c1000da5f4b184f0d9dc9faf275c79ac73a4
 
 本次验证的是 OpenAI 官方 Codex 运行环境的安装与主界面启动，不是 CodexBoard Windows 安装包。上述结果不证明 Windows 11、IPC、真实任务或完整应用功能已通过。
 
-## 2026-09-23 Windows 桥接检查准备
+## 2026-09-23 Windows 桥接实机检查
 
 在 `4a80653` 上只读审查现有桥接入口，并核对已下载官方 MSIX 的 manifest 与文件表。桌面入口为 `app\ChatGPT.exe`，CLI 为 `app\resources\codex.exe`；包内另一个 `app\Codex.exe` 不能据文件名当作 CLI。包内容核对不等于云桌面运行验证。
 
@@ -186,4 +186,20 @@ fb4745f5378c8a4122f74643a3c7c1000da5f4b184f0d9dc9faf275c79ac73a4
 | `apps/server/src/modules/codex/supervisor.ts`、`scripts/codex-session-bridge.mjs` | supervisor 固定构造 `unix://`，桥接 CLI 也只接受该协议。                   |
 | `scripts/run-codex-app-server.mjs`、`apps/server/src/modules/codex/transports.ts` | 仍依赖 POSIX `0600` 权限检查，Windows ACL 的等效保护未实现。               |
 
-下一步实机检查仅收集当前用户 `OpenAI.Codex` 包元信息、包内入口文件是否存在、匹配的开始菜单入口、安装目录内关联进程的 PID 与可执行文件路径，以及名称包含 Codex/OpenAI 的命名管道候选。不读取认证文件、命令行、环境变量或现有日志，不连接管道或接管会话。没有匹配进程或管道不能独立证明崩溃或没有 IPC；桥接 `/readyz` 在 helper 启动前即可返回 200，也不能作为集成成功的证据。
+随后在同一无影 Windows Server 2022 云桌面中，通过管理员 PowerShell 直接执行分段输入的只读查询，并在 Windows Chrome 中逐项查看生成的 `report.html`。报告时间为 `2026-09-23T00:29:04.0452817+08:00`；预先准备的 `Inspect-Codex-Runtime.ps1/.cmd` 未上传、未执行。
+
+| 检查              | 实测结果                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| 当前用户包        | `OpenAI.Codex`，版本 `26.915.4065.0`，架构 `X64`，`Status: Ok`，`SignatureKind: Store`                 |
+| PackageFamilyName | `OpenAI.Codex_2p2nqsd0c76g0`                                                                           |
+| InstallLocation   | `C:\Program Files\WindowsApps\OpenAI.Codex_26.915.4065.0_x64__2p2nqsd0c76g0`                           |
+| 包内文件存在性    | `app\ChatGPT.exe`、`app\resources\codex.exe`、`app\resources\app.asar` 均为 `true`                     |
+| 开始菜单入口      | `Get-StartApps` 精确匹配到 `Name: ChatGPT`、`AppID: OpenAI.Codex_2p2nqsd0c76g0!App`                    |
+| 安装目录内进程    | 观察到 `ChatGPT.exe` 进程；本次筛选结果未出现运行中的 `Codex.exe`                                      |
+| 命名管道候选      | 名称筛选得到 6 条：`\\.\pipe\codex-ipc`，另有 1 条 sandbox、3 条 browser-use 和 1 条 computer-use 名称 |
+
+进程查询仅选择 `ProcessId`、`ParentProcessId`、`Name` 和 `ExecutablePath`，先限定名称为 `ChatGPT.exe` 或 `Codex.exe`，再限定可执行文件位于上述包安装目录。管道检查仅枚举 `[IO.Directory]::GetFiles('\\.\pipe\')` 返回的名称，并以 `codex|openai` 筛选。上述进程与管道结果是检查时刻的快照；没有匹配进程不能独立证明应用崩溃，候选管道名也不证明其归属、协议、ACL 或连接可用。
+
+本轮新建报告保存在云桌面的 `C:\Users\admin\Downloads\037d6e48-7008-48cc-9be1-3809b5d37600\`，包含 `result.json`、`report.html` 和初步包信息页 `package.html`。文件未下载到 Mac。查询没有读取认证文件、进程命令行、环境变量列表或现有日志；仅使用 `USERPROFILE` 定位 Downloads 目录。没有连接 IPC、接管会话、启动真实任务或修改安全策略。
+
+本轮确认了已安装包、运行进程及 `codex-ipc` 命名管道候选的存在，下一步仍需实现 Windows IPC 适配并验证实际协议与权限。上述静态桥接阻断、CI 失败、Rust 图标缺失和 `0600` 权限断言失败均未因此解决；不能据此认定 CodexBoard Windows 版可运行。桥接 `/readyz` 在 helper 启动前即可返回 200，也不能作为集成成功的证据。
