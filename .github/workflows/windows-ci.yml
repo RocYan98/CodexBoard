@@ -102,6 +102,12 @@ jobs:
           npm run build -w @codexboard/contracts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build -w @codexboard/taskctl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ('${{ matrix.suite }}' -eq 'desktop-scripts') {
+            npm run build -w @codexboard/server
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            npm run build -w @codexboard/web
+          }
       - name: Install browser engines for desktop UI tests
         if: matrix.suite == 'desktop-scripts'
         run: npx --no-install playwright install chromium webkit

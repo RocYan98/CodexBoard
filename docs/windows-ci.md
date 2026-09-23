@@ -6,14 +6,14 @@
 
 ## 检查范围
 
-| 作业                                     | 实际检查                                                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Node and web build                       | 使用 Node 22.23.2、`npm ci` 和锁文件，构建 contracts、taskctl、server、web；执行类型检查及 ESLint |
-| contracts / taskctl / server / web tests | 各工作区完整 Vitest 测试，不通过排除 Windows 失败用例取得绿灯                                     |
-| scripts tests                            | `scripts/` 下完整 Node 测试，显式展开文件列表，避免依赖 shell 通配符                              |
-| desktop-scripts tests                    | 桌面脚本完整 Node 测试，包含 Chromium 和 WebKit 界面检查                                          |
-| Desktop Rust compilation                 | 使用 Cargo 锁文件检查桌面程序及测试目标                                                           |
-| Test installer                           | 校验并打包 Windows x64 Node/Caddy/frpc，生成独立测试用 NSIS 安装包及 SHA-256                      |
+| 作业                                     | 实际检查                                                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Node and web build                       | 使用 Node 22.23.2、`npm ci` 和锁文件，构建 contracts、taskctl、server、web；执行类型检查及 ESLint                                  |
+| contracts / taskctl / server / web tests | 各工作区完整 Vitest 测试，不通过排除 Windows 失败用例取得绿灯                                                                      |
+| scripts tests                            | `scripts/` 下完整 Node 测试，显式展开文件列表，避免依赖 shell 通配符                                                               |
+| desktop-scripts tests                    | 桌面脚本完整 Node 测试，包含 Chromium 和 WebKit 界面检查                                                                           |
+| Desktop Rust compilation                 | 使用 Cargo 锁文件检查桌面程序及测试目标                                                                                            |
+| Test installer                           | 校验并打包 Windows x64 Node/Caddy/frpc，启动包内后端验证健康接口、首页、登录保护和正常退出，再生成独立测试用 NSIS 安装包及 SHA-256 |
 
 每个测试组独立运行，一个组失败不会取消其他组。失败保留非零退出码，工作流总状态也会失败。不能把“工作流成功启动”或“网页构建通过”解释为 Windows 桌面版已适配。
 
@@ -22,6 +22,8 @@
 Node 脚本测试默认使用 120 秒的文件超时；Windows 桌面脚本因真实 ACL 检查启动多个 PowerShell 进程，使用 300 秒。挂起或遗留句柄按失败记录到 JUnit，不强制将未退出的测试算作通过。Windows server/taskctl 的 Vitest 单项和 hook 使用 30 秒预算、最多两个 worker。外层作业另有时限。
 
 CI 不运行需要真实 Codex 的 `codex:protocol:check`，不启动真实任务、不使用飞书凭据，不运行依赖 Unix 模拟桌面的整体 `test:e2e`。Windows ACL 有真实 DACL 检查；GitHub Windows 运行器以管理员运行，仍不能代替普通 Windows 11 用户的隔离验收。真实桌面集成在独立云桌面验证。
+
+安装包后端冒烟测试使用实际产物中的 Node、服务器代码和生产依赖，Windows 路径包含与 Tauri 一致的命名空间前缀。测试使用独立临时 HOME、数据目录和只接受固定只读方法的本地假 WebSocket 对端，不读取真实 Codex 配置或执行任务。结果中的 `codexMode: isolated-fake-websocket` 明确表示它不验证 embedded 模式的真实 Codex 启动链路；这部分仍需云桌面验收。
 
 ## 产物与结果
 

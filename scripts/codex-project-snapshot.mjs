@@ -58,6 +58,9 @@ export function readCodexDesktopProjects(stateFile) {
   if (!localProjects || typeof localProjects !== "object" || Array.isArray(localProjects)) {
     throw new Error("Codex 项目状态缺少 local-projects");
   }
+  // A fresh Desktop installation can omit project-order until its first
+  // project. Only a valid, empty project map makes that omission unambiguous.
+  if (projectOrder === undefined && Object.keys(localProjects).length === 0) return [];
   if (!Array.isArray(projectOrder)) {
     throw new Error("Codex 项目状态缺少 project-order");
   }

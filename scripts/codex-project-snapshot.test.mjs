@@ -102,6 +102,86 @@ test("filters the Desktop state strictly by project-order", () => {
   }
 });
 
+test("accepts a fresh Windows Desktop empty project map without a persisted order", () => {
+  const value = fixture();
+  try {
+    const contents = JSON.stringify({ "local-projects": {} });
+    writeFileSync(value.stateFile, contents);
+    assert.deepEqual(readCodexDesktopProjects(value.stateFile), []);
+    assert.equal(readFileSync(value.stateFile, "utf8"), contents);
+    rmSync(value.stateFile);
+    assert.throws(() => readCodexDesktopProjects(value.stateFile), { code: "ENOENT" });
+  } finally {
+    rmSync(value.directory, { recursive: true, force: true });
+  }
+});
+
+test("does not infer an empty project list from malformed or incomplete nonempty state", () => {
+  const value = fixture();
+  try {
+    for (const invalid of [
+      null,
+      [],
+      {},
+      { "project-order": [] },
+      { "local-projects": null },
+      { "local-projects": [] },
+      { "local-projects": "" },
+      { "local-projects": {}, "project-order": null },
+      { "local-projects": {}, "project-order": "" },
+      { "local-projects": {}, "project-order": {} },
+      { "local-projects": state()["local-projects"] },
+    ]) {
+      const contents = JSON.stringify(invalid);
+      writeFileSync(value.stateFile, contents);
+      assert.throws(() => readCodexDesktopProjects(value.stateFile));
+      assert.equal(readFileSync(value.stateFile, "utf8"), contents);
+    }
+    writeFileSync(value.stateFile, '{"local-projects":');
+    assert.throws(() => readCodexDesktopProjects(value.stateFile), SyntaxError);
+  } finally {
+    rmSync(value.directory, { recursive: true, force: true });
+  }
+});
+
+test("starts with an empty Desktop state, then watches ordered additions without losing a good snapshot", async () => {
+  const value = fixture();
+  const errors = [];
+  let notifyChange;
+  writeFileSync(value.stateFile, JSON.stringify({ "local-projects": {} }));
+  const writer = startCodexProjectSnapshotWriter({
+    stateFile: value.stateFile,
+    snapshotFile: value.snapshotFile,
+    debounceMs: 5,
+    reconcileMs: 60_000,
+    onError: (error) => errors.push(error),
+    watchFactory: (_directory, listener) => {
+      notifyChange = listener;
+      return { close() {}, on() {} };
+    },
+  });
+  try {
+    assert.deepEqual(JSON.parse(readFileSync(value.snapshotFile, "utf8")).projects, []);
+    writeFileSync(value.stateFile, JSON.stringify(state([PROJECT_B, PROJECT_A])));
+    notifyChange("change", ".codex-global-state.json");
+    await waitFor(() => {
+      const snapshot = JSON.parse(readFileSync(value.snapshotFile, "utf8"));
+      return (
+        snapshot.projects.map((project) => project.codexProjectId).join(",") ===
+        `${PROJECT_B},${PROJECT_A}`
+      );
+    });
+    const lastGood = readFileSync(value.snapshotFile, "utf8");
+    writeFileSync(value.stateFile, JSON.stringify({ "local-projects": state()["local-projects"] }));
+    assert.equal(writer.refresh(), false);
+    assert.equal(readFileSync(value.snapshotFile, "utf8"), lastGood);
+    assert.deepEqual(errors, [{ code: "CODEX_PROJECT_STATE_INVALID" }]);
+  } finally {
+    writer.close();
+    rmSync(value.directory, { recursive: true, force: true });
+  }
+});
+
 test("flushes each snapshot file before atomic replacement and syncs directories where supported", (t) => {
   const value = fixture();
   const snapshot = {

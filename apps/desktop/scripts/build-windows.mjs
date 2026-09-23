@@ -19,6 +19,7 @@ import {
 import { copyThirdPartyLicenses } from "./third-party-licenses.mjs";
 import { copyCargoLicenses } from "./cargo-licenses.mjs";
 import { copyBundledSkill } from "./package-skills.mjs";
+import { smokePackagedServer } from "./server-smoke.mjs";
 
 export const WINDOWS_RUNTIME_ASSETS = Object.freeze([
   {
@@ -139,6 +140,14 @@ export async function buildWindows() {
       "import Database from 'better-sqlite3';const db=new Database(':memory:');if(db.prepare('select 1 as ok').get().ok!==1)process.exit(1);db.close()",
     ],
     { cwd: runtime },
+  );
+  const smoke = await smokePackagedServer({
+    runtimeRoot: runtime,
+    nodePath: join(runtime, "bin/node.exe"),
+  });
+  writeFileSync(join(runtime, "server-smoke.json"), `${JSON.stringify(smoke, null, 2)}\n`);
+  process.stdout.write(
+    "Bundled backend smoke passed: health, web assets, authentication, IPC shutdown.\n",
   );
   const cli = join(project, "node_modules/@tauri-apps/cli/tauri.js");
   const bundleConfig = JSON.stringify(WINDOWS_BUNDLE_CONFIG);
