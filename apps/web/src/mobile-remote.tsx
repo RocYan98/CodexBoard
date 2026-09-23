@@ -401,7 +401,7 @@ function RemotePage({
                 <span
                   className={`remote-host-dot${!threads.data || threads.isError ? " is-offline" : ""}`}
                 />
-                <RemoteGlyph name="desktop" /> 此 Mac
+                <RemoteGlyph name="desktop" /> 此电脑
               </div>
             </div>
             <button
@@ -517,7 +517,7 @@ function RemotePage({
               <div className="remote-empty">
                 <SfSymbol name="bubble.left" />
                 <h2>{search ? "没有匹配的任务" : "开始一个新任务"}</h2>
-                <p>让 Codex 在你的 Mac 上继续工作。</p>
+                <p>让 Codex 在你的电脑 上继续工作。</p>
               </div>
             ) : null}
             {!threads.isPending && organization !== "time" && (
@@ -946,7 +946,7 @@ function RemoteConversation({
         </button>
         <div className="remote-heading">
           <strong>{thread?.title || "Codex"}</strong>
-          <small>{thread ? `${folder(thread.cwd)} · 此 Mac` : "连接桌面…"}</small>
+          <small>{thread ? `${folder(thread.cwd)} · 此电脑` : "连接桌面…"}</small>
         </div>
         <button
           className="remote-icon remote-floating"
@@ -1040,7 +1040,7 @@ function RemoteConversation({
           {thread && thread.turns.length === 0 && (
             <div className="remote-empty">
               <h2>有什么需要帮忙？</h2>
-              <p>发送消息，Codex 会在你的 Mac 上执行。</p>
+              <p>发送消息，Codex 会在你的电脑 上执行。</p>
             </div>
           )}
           {thread?.turns.map((turn) => (
@@ -1214,7 +1214,7 @@ function RemoteConversation({
             pending={mutation.isPending}
             busy={!!busy}
             canQueue={canQueue}
-            placeholder={busy ? "跟进" : "在此 Mac 上工作"}
+            placeholder={busy ? "跟进" : "在此电脑 上工作"}
             onSubmit={() => {
               if (!unavailable && (!busy || canQueue)) send(!!busy);
             }}

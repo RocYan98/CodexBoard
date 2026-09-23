@@ -42,7 +42,7 @@ export function RemoteComposer({
   currentModel,
   currentEffort,
   submitLabel = "发送消息",
-  placeholder = "在此 Mac 上工作",
+  placeholder = "在此电脑 上工作",
   inputLabel = "发送给 Codex",
   inputRef,
 }: {
