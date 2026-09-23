@@ -1,5 +1,8 @@
 import type { Readable, Writable } from "node:stream";
-import { lstatSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { assertPrivateFileSync } from "../../../../../scripts/private-file-permissions.mjs";
+import { isWindowsPipePath } from "../../../../../scripts/codex-local-endpoint.mjs";
 
 import WebSocket, { type RawData } from "ws";
 
@@ -126,6 +129,7 @@ export class JsonlStreamTransport implements CodexTransport {
 
 interface UnixWebSocketTransportOptions {
   readonly socketPath: string;
+  readonly token?: string;
   readonly requestPath?: string;
   readonly connectTimeoutMs?: number;
   readonly connectRetryMs?: number;
@@ -134,6 +138,8 @@ interface UnixWebSocketTransportOptions {
 export class UnixWebSocketTransport implements CodexTransport {
   readonly description = "unix-websocket";
   readonly #url: string;
+  readonly #pipePath: string | undefined;
+  readonly #token: string | undefined;
   readonly #connectTimeoutMs: number;
   readonly #connectRetryMs: number;
   readonly #messageListeners = new Set<(message: unknown) => void>();
@@ -144,7 +150,14 @@ export class UnixWebSocketTransport implements CodexTransport {
 
   constructor(options: UnixWebSocketTransportOptions) {
     const requestPath = options.requestPath ?? "/";
-    this.#url = `ws+unix://${options.socketPath}:${requestPath}`;
+    this.#pipePath = isWindowsPipePath(options.socketPath) ? options.socketPath : undefined;
+    if (this.#pipePath && !options.token) {
+      throw new Error("Windows named pipe transport requires a capability token");
+    }
+    this.#token = options.token;
+    this.#url = this.#pipePath
+      ? `ws://localhost${requestPath}`
+      : `ws+unix://${options.socketPath}:${requestPath}`;
     this.#connectTimeoutMs = options.connectTimeoutMs ?? 5_000;
     this.#connectRetryMs = options.connectRetryMs ?? 50;
   }
@@ -158,7 +171,11 @@ export class UnixWebSocketTransport implements CodexTransport {
     const deadline = Date.now() + this.#connectTimeoutMs;
     try {
       for (;;) {
-        const socket = new WebSocket(this.#url, { perMessageDeflate: false });
+        const socket = new WebSocket(this.#url, {
+          perMessageDeflate: false,
+          ...(this.#token ? { headers: { authorization: `Bearer ${this.#token}` } } : {}),
+          ...(this.#pipePath ? { createConnection: () => createConnection(this.#pipePath!) } : {}),
+        });
         this.#socket = socket;
         socket.on("message", this.#onMessage);
         socket.on("close", this.#onClose);
@@ -271,10 +288,7 @@ interface TcpWebSocketTransportOptions {
 }
 
 function readCapabilityToken(path: string): string {
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
-    throw new Error("Codex capability token 文件必须是权限不宽于 0600 的普通文件");
-  }
+  assertPrivateFileSync(path);
   const token = readFileSync(path, "utf8").trim();
   if (!token) throw new Error("Codex capability token 文件为空");
   return token;

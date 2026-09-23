@@ -13,6 +13,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { assertPrivateFileSync } from "./private-file-permissions.mjs";
 
 import {
   readCodexDesktopProjects,
@@ -189,7 +190,9 @@ test("keeps the last good snapshot and reports only a safe error code", () => {
     assert.equal(writer.refresh(), false);
     assert.equal(readFileSync(value.snapshotFile, "utf8"), lastGood);
     assert.deepEqual(errors.at(-1), { code: "CODEX_PROJECT_STATE_INVALID" });
-    assert.equal(statSync(value.snapshotFile).mode & 0o777, 0o600);
+    assertPrivateFileSync(value.snapshotFile);
+    if (process.platform !== "win32")
+      assert.equal(statSync(value.snapshotFile).mode & 0o777, 0o600);
   } finally {
     writer.close();
     rmSync(value.directory, { recursive: true, force: true });

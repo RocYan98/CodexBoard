@@ -79,6 +79,10 @@ function isolatedEnvironment(home) {
   return {
     ...environment,
     ...directories,
+    // Git expands Windows 8.3 temp aliases. Give fixtures the same native path.
+    ...(process.platform === "win32"
+      ? { TEMP: realpathSync.native(tmpdir()), TMP: realpathSync.native(tmpdir()) }
+      : {}),
     // rustup needs the installed toolchain even though test configuration is isolated.
     CARGO_HOME: environment.CARGO_HOME ?? join(homedir(), ".cargo"),
     RUSTUP_HOME: environment.RUSTUP_HOME ?? join(homedir(), ".rustup"),
@@ -99,6 +103,7 @@ function suiteCommand(rootDirectory, suite, outputDirectory, testTimeoutMs) {
       cwd: rootDirectory,
       args: [
         "--test",
+        ...(process.platform === "win32" ? ["--test-concurrency=4"] : []),
         `--test-timeout=${testTimeoutMs}`,
         "--test-reporter=spec",
         "--test-reporter-destination=stdout",
@@ -151,7 +156,7 @@ export async function runSuite(
   let home;
   try {
     writeFileSync(join(outputDirectory, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
-    home = mkdtempSync(join(tmpdir(), `codexboard-ci-${suite}-`));
+    home = mkdtempSync(join(realpathSync.native(tmpdir()), `codexboard-ci-${suite}-`));
     const environment = isolatedEnvironment(home);
     const { cwd, args } = suiteCommand(rootDirectory, suite, outputDirectory, testTimeoutMs);
     const execution = await new Promise((complete) => {

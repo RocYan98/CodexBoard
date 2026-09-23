@@ -3,9 +3,59 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
+import { bridgeSocketPath, localEndpoint } from "./codex-local-endpoint.mjs";
 const realSetTimeout = setTimeout;
 import WebSocket from "ws";
 import { createCodexSessionBridge } from "./codex-session-bridge.mjs";
+
+test("Windows pipes require authentication before the bridge binds", async () => {
+  await assert.rejects(
+    createCodexSessionBridge({
+      codexPath: process.execPath,
+      endpoint: "npipe://./pipe/codexboard-test",
+    }),
+    /认证令牌/,
+  );
+});
+
+test("local bridge accepts the capability and rejects other local clients", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "codex-local-bridge-"));
+  const path = bridgeSocketPath(directory);
+  const bridge = await createCodexSessionBridge({
+    codexPath: process.execPath,
+    endpoint: localEndpoint(path),
+    token: "local-capability",
+  });
+  const connect = (token) =>
+    new WebSocket("ws://localhost/", {
+      createConnection: () => createConnection({ path }),
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  try {
+    const rejected = connect("wrong");
+    await new Promise((resolve, reject) => {
+      rejected.once("open", () => reject(new Error("unauthorized connection accepted")));
+      rejected.once("error", (error) => {
+        assert.match(error.message, /403/);
+        resolve();
+      });
+    });
+    const accepted = connect("local-capability");
+    await new Promise((resolve, reject) => {
+      accepted.once("open", resolve);
+      accepted.once("error", reject);
+    });
+    await new Promise((resolve) => {
+      accepted.once("close", resolve);
+      accepted.close();
+    });
+  } finally {
+    await bridge.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("honors WebSocket's default port instead of selecting a random port", async () => {
   let bridge;
@@ -28,7 +78,7 @@ test("honors WebSocket's default port instead of selecting a random port", async
 
 test("persists and releases creators before using Desktop exclusively for turns", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "codex-session-bridge-"));
-  const command = join(directory, "fake-codex");
+  const command = join(directory, "fake-codex.cjs");
   writeFileSync(
     command,
     `#!/usr/bin/env node
@@ -90,7 +140,9 @@ readline.createInterface({input:process.stdin}).on('line', line => {
  if(!m.method && m.id===77) return send({method:'item/completed',params:{threadId:thread,item:{type:'agentMessage',text:m.result.decision}}});
  send({id:m.id,result:{}});
 });
-process.on('SIGTERM',()=>setTimeout(()=>{if(lock && fs.existsSync(lock)) fs.unlinkSync(lock);process.exit(0);},50));
+const finish=()=>setTimeout(()=>{if(lock && fs.existsSync(lock)) fs.unlinkSync(lock);process.exit(0);},50);
+process.on('SIGTERM',finish);
+process.stdin.on('end',finish);
 `,
     { mode: 0o700 },
   );
@@ -98,7 +150,8 @@ process.on('SIGTERM',()=>setTimeout(()=>{if(lock && fs.existsSync(lock)) fs.unli
   let desktopStopped = false;
   let desktopConnections = 0;
   const bridge = await createCodexSessionBridge({
-    codexPath: command,
+    codexPath: process.execPath,
+    spawnProcess: (executable, args, options) => spawn(executable, [command, ...args], options),
     endpoint: "ws://127.0.0.1:0",
     token: "test-token",
     desktopSessionConnector: async ({ threadId, onMessage }) => {

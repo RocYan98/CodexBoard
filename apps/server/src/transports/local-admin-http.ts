@@ -571,7 +571,7 @@ export function createLocalAdminApp(options: CreateLocalAdminAppOptions): Fastif
     );
     let cwd: string;
     try {
-      cwd = resolve(realpathSync(requestedCwd));
+      cwd = resolve(realpathSync.native(requestedCwd));
     } catch (cause: unknown) {
       throw new AppError("INVALID_REQUEST", 400, "taskctl 工作目录不存在", { cause });
     }

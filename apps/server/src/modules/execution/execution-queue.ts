@@ -167,6 +167,10 @@ function requestHash(value: unknown): string {
     .digest("hex");
 }
 
+function quoteShellArgument(value: string): string {
+  return "'" + value.replaceAll("'", process.platform === "win32" ? "''" : "'\\''") + "'";
+}
+
 export class ExecutionQueue {
   readonly #database: SqliteDatabase;
   readonly #taskctlCommand: string;
@@ -176,11 +180,23 @@ export class ExecutionQueue {
 
   constructor(options: ExecutionQueueOptions) {
     this.#database = options.database;
-    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+    const quote = quoteShellArgument;
     const cli = fileURLToPath(
       new URL("../../../../../packages/taskctl/dist/cli.js", import.meta.url),
     );
-    this.#taskctlCommand = `CODEXBOARD_DATA_DIR=${quote(resolve(options.executorDataDirectory ?? options.dataDirectory ?? normalizeCodexBoardEnvironment(process.env).CODEXBOARD_DATA_DIR ?? ".data"))} ${quote(options.executorNodePath ?? process.execPath)} ${quote(options.executorTaskctlPath ?? cli)}`;
+    const data = quote(
+      resolve(
+        options.executorDataDirectory ??
+          options.dataDirectory ??
+          normalizeCodexBoardEnvironment(process.env).CODEXBOARD_DATA_DIR ??
+          ".data",
+      ),
+    );
+    const executable = `${quote(options.executorNodePath ?? process.execPath)} ${quote(options.executorTaskctlPath ?? cli)}`;
+    this.#taskctlCommand =
+      process.platform === "win32"
+        ? `$env:CODEXBOARD_DATA_DIR=${data}; & ${executable}`
+        : `CODEXBOARD_DATA_DIR=${data} ${executable}`;
     this.#now = options.now ?? (() => new Date());
     this.#leaseDurationMs = options.leaseDurationMs ?? 30_000;
     this.#onRevisionCommitted = options.onRevisionCommitted;
@@ -895,7 +911,7 @@ export class ExecutionQueue {
     const attachmentSnapshot = attachments.map((attachment) => {
       const snapshotId = randomUUID();
       const downloadPath = resolve(temporaryDirectory, `attachment-${snapshotId}`);
-      const quotedDownloadPath = "'" + downloadPath.replaceAll("'", "'\\''") + "'";
+      const quotedDownloadPath = quoteShellArgument(downloadPath);
       return {
         ...attachment,
         id: snapshotId,

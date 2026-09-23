@@ -17,6 +17,12 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+  assertPrivateFileSync,
+  assertPrivateDirectorySync,
+} from "#private-file-permissions";
 
 const NAME = "manage-codexboard";
 // Recognize installed pre-rename Skills without moving or replacing user files.
@@ -126,6 +132,7 @@ function scanTree(root) {
     throw new SkillError("changed");
   return {
     exists: true,
+    root,
     identity: id,
     files: records,
     mode: Number(stat.mode) & 0o777,
@@ -194,7 +201,19 @@ function matchesFiles(tree, files, withReceipt = false) {
   if (tree.files.some((file) => file.type === "directory" && !directories.has(file.path)))
     return false;
   if (!withReceipt && tree.files.some((file) => file.path === RECEIPT)) return false;
+  if (process.platform === "win32" && withReceipt) {
+    try {
+      assertPrivateDirectorySync(tree.root);
+      for (const entry of tree.files) {
+        if (entry.type === "directory") assertPrivateDirectorySync(join(tree.root, entry.path));
+        else assertPrivateFileSync(join(tree.root, entry.path));
+      }
+    } catch {
+      return false;
+    }
+  }
   if (
+    process.platform !== "win32" &&
     withReceipt &&
     (tree.mode !== 0o700 ||
       tree.files.some((file) => file.type === "directory" && file.mode !== 0o700) ||
@@ -206,7 +225,9 @@ function matchesFiles(tree, files, withReceipt = false) {
   return files.every((file) =>
     actual.some(
       (entry) =>
-        entry.path === file.path && entry.sha256 === file.sha256 && entry.mode === file.mode,
+        entry.path === file.path &&
+        entry.sha256 === file.sha256 &&
+        (process.platform === "win32" || entry.mode === file.mode),
     ),
   );
 }
@@ -319,8 +340,11 @@ export function createSkillManager({
           message: "可为 Codex 安装随包 Skill。",
         };
       result.status = "modified";
-      result.canReplace = true;
-      result.message = messages.modified;
+      result.canReplace = process.platform !== "win32";
+      result.message =
+        process.platform === "win32"
+          ? "Windows 测试版暂不支持原子替换已有 Skill；现有目录已保留，请在原安装工具中处理。"
+          : messages.modified;
       try {
         const raw = readRegular(join(targetPath, RECEIPT), 256 * 1024).bytes;
         const receipt = JSON.parse(raw);
@@ -348,10 +372,12 @@ export function createSkillManager({
         return {
           ...result,
           status: result.updateAvailable ? "updateAvailable" : "current",
-          canInstall: result.updateAvailable,
+          canInstall: result.updateAvailable && process.platform !== "win32",
           canReplace: false,
           message: result.updateAvailable
-            ? "随包 Skill 有更新；点击更新后才会替换文件。"
+            ? process.platform === "win32"
+              ? "随包 Skill 有更新，Windows 测试版暂不支持原子替换；现有目录已保留。"
+              : "随包 Skill 有更新；点击更新后才会替换文件。"
             : messages.installed,
         };
       } catch {
@@ -372,6 +398,7 @@ export function createSkillManager({
     if (!statOrNull(path)) {
       ensureDirectory(dirname(path));
       mkdirSync(path, { mode: 0o700 });
+      if (process.platform === "win32") ensurePrivateDirectorySync(path);
     }
     assertPlainPath(path);
   }
@@ -383,8 +410,9 @@ export function createSkillManager({
       mode,
     );
     try {
+      if (process.platform === "win32") ensurePrivateFileSync(path);
       writeFileSync(fd, bytes);
-      fchmodSync(fd, mode);
+      if (process.platform !== "win32") fchmodSync(fd, mode);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -413,6 +441,8 @@ export function createSkillManager({
       if (["managed", "unavailable", "error"].includes(initial.status))
         throw new SkillError("managed", initial.message);
       if (initial.status === "current") return initial;
+      if (process.platform === "win32" && initial.status !== "notInstalled")
+        throw new SkillError("commit", initial.message);
       if (initial.status === "modified" && options.replaceModified !== true)
         throw new SkillError("modified");
       const expected = options.expectedFingerprint ?? undefined;
@@ -428,13 +458,17 @@ export function createSkillManager({
       ensureDirectory(parent);
       stage = join(parent, `${STAGE_PREFIX}${randomUUID()}`);
       mkdirSync(stage, { mode: 0o700 });
+      if (process.platform === "win32") ensurePrivateDirectorySync(stage);
       stageIdentity = identity(lstatSync(stage, { bigint: true }));
       for (const file of bundled.files) {
         const destination = join(stage, file.path);
         ensureDirectory(dirname(destination));
         assertPlainPath(dirname(join(source, file.path)));
         const data = readRegular(join(source, file.path));
-        if (sha256(data.bytes) !== file.sha256 || data.mode !== file.mode)
+        if (
+          sha256(data.bytes) !== file.sha256 ||
+          (process.platform !== "win32" && data.mode !== file.mode)
+        )
           throw new SkillError("bundle");
         writeNewFile(destination, data.bytes, file.mode);
       }

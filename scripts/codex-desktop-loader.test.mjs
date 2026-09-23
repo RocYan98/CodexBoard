@@ -100,3 +100,21 @@ test("loading failure is bounded and does not expose native diagnostics", async 
 test("rejects nonpersistent ids before opening an application", async () => {
   await assert.rejects(openDesktopThread("x; touch /tmp/invalid"), /编号/);
 });
+
+test("Windows opens only the validated deep link without a command shell or a new turn", async () => {
+  let call;
+  await openDesktopThread(threadId, {
+    platform: "win32",
+    execute: (command, args, options, callback) => {
+      call = { command, args, options };
+      callback(null);
+    },
+  });
+  assert.equal(call.command, "powershell.exe");
+  assert.match(call.args.at(-1), new RegExp(`codex://threads/${threadId}`));
+  assert.doesNotMatch(call.args.join(" "), /ExecutionPolicy|Bypass|turn\/start/);
+  await assert.rejects(
+    openDesktopThread("id'; bad", { platform: "win32", execute: () => assert.fail() }),
+    /编号/,
+  );
+});

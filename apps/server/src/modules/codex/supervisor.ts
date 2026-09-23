@@ -3,11 +3,14 @@ import { fileURLToPath } from "node:url";
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, lstatSync, unlinkSync } from "node:fs";
 import { createConnection } from "node:net";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
+import { isWindowsPipePath, localEndpoint } from "../../../../../scripts/codex-local-endpoint.mjs";
 
 export interface ManagedCodexProcess {
   readonly pid?: number;
   readonly stderr: Readable;
+  readonly stdin?: Writable | null;
+  readonly stdout?: Readable | null;
   readonly killed: boolean;
   readonly exitCode: number | null;
   kill(signal: NodeJS.Signals): boolean;
@@ -26,6 +29,7 @@ export interface CodexSupervisorHealth {
 interface CodexAppServerSupervisorOptions {
   readonly socketPath: string;
   readonly codexCommand?: string;
+  readonly token?: string;
   readonly startupTimeoutMs?: number;
   readonly startupPollMs?: number;
   readonly shutdownTimeoutMs?: number;
@@ -51,6 +55,7 @@ function redact(value: string): string {
 export class CodexAppServerSupervisor {
   readonly #socketPath: string;
   readonly #codexCommand: string;
+  readonly #token: string | undefined;
   readonly #startupTimeoutMs: number;
   readonly #startupPollMs: number;
   readonly #shutdownTimeoutMs: number;
@@ -66,6 +71,9 @@ export class CodexAppServerSupervisor {
   constructor(options: CodexAppServerSupervisorOptions) {
     this.#socketPath = options.socketPath;
     this.#codexCommand = options.codexCommand ?? "codex";
+    this.#token = options.token;
+    if (isWindowsPipePath(options.socketPath) && !options.token)
+      throw new Error("Windows Codex 桥接需要认证令牌");
     this.#startupTimeoutMs = options.startupTimeoutMs ?? 15_000;
     this.#startupPollMs = options.startupPollMs ?? 50;
     // The bridge may need 5s to reap session workers before it can exit.
@@ -102,6 +110,8 @@ export class CodexAppServerSupervisor {
     this.#error = null;
     this.#stderr = "";
     this.#removeStaleSocket();
+    const windowsPipe = isWindowsPipePath(this.#socketPath);
+    let ownedListenerReady = !windowsPipe;
     const child = this.#spawnProcess(
       process.execPath,
       [
@@ -109,11 +119,21 @@ export class CodexAppServerSupervisor {
         "--codex",
         this.#codexCommand,
         "--listen",
-        `unix://${this.#socketPath}`,
+        localEndpoint(this.#socketPath),
       ],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      {
+        stdio: [windowsPipe ? "pipe" : "ignore", windowsPipe ? "pipe" : "ignore", "pipe"],
+        ...(this.#token ? { env: { ...process.env, CODEXBOARD_BRIDGE_TOKEN: this.#token } } : {}),
+      },
     );
     this.#process = child;
+    if (windowsPipe) {
+      let readinessOutput = "";
+      child.stdout?.on("data", (chunk: string | Buffer) => {
+        readinessOutput = `${readinessOutput}${chunk.toString()}`.slice(-128);
+        if (readinessOutput.includes("CODEXBOARD_BRIDGE_READY\n")) ownedListenerReady = true;
+      });
+    }
     child.stderr.on("data", (chunk: string | Buffer) => {
       this.#stderr = `${this.#stderr}${chunk.toString()}`.slice(-8_000);
     });
@@ -148,7 +168,9 @@ export class CodexAppServerSupervisor {
         this.#error ??= redact(this.#stderr || "Codex App Server 进程提前退出");
         throw new Error("Codex App Server 启动失败");
       }
-      if (await this.#readinessProbe()) {
+      // A connect alone could reach a pipe pre-created by another process. The
+      // private child stdout confirms that our own bridge successfully bound.
+      if (ownedListenerReady && (await this.#readinessProbe())) {
         this.#status = "ready";
         this.#error = null;
         return;
@@ -177,7 +199,8 @@ export class CodexAppServerSupervisor {
       };
       child.once("exit", onExit);
     });
-    child.kill("SIGTERM");
+    if (isWindowsPipePath(this.#socketPath) && child.stdin) child.stdin.end();
+    else child.kill("SIGTERM");
     const graceful = await Promise.race([
       exited.then(() => true),
       delay(this.#shutdownTimeoutMs).then(() => false),
@@ -194,6 +217,7 @@ export class CodexAppServerSupervisor {
   }
 
   #removeStaleSocket(): void {
+    if (isWindowsPipePath(this.#socketPath)) return;
     if (!existsSync(this.#socketPath)) return;
     const stat = lstatSync(this.#socketPath);
     if (stat.isSymbolicLink() || !stat.isSocket()) {
@@ -203,6 +227,7 @@ export class CodexAppServerSupervisor {
   }
 
   #removeOwnedSocket(): void {
+    if (isWindowsPipePath(this.#socketPath)) return;
     if (!existsSync(this.#socketPath)) return;
     const stat = lstatSync(this.#socketPath);
     if (!stat.isSymbolicLink() && stat.isSocket()) unlinkSync(this.#socketPath);

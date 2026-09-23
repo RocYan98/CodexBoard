@@ -3,6 +3,10 @@
   "version": "0.1.10",
   "private": true,
   "type": "module",
+  "imports": {
+    "#private-file-permissions": "./scripts/private-file-permissions.mjs",
+    "#codex-windows-app": "./scripts/codex-windows-app.mjs"
+  },
   "engines": {
     "node": ">=22"
   },

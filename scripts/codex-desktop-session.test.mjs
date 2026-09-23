@@ -7,6 +7,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { storeRemoteUpload } from "./codex-remote-upload.mjs";
 import { connectDesktopSession } from "./codex-desktop-session.mjs";
+import { bridgeSocketPath } from "./codex-local-endpoint.mjs";
 
 test("remote send applies explicit approval presets only through the existing owner", async (t) => {
   const f = await fixture(t);
@@ -570,7 +571,7 @@ async function fixture(
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "desktop-session-"));
-  const socketPath = join(directory, "ipc.sock");
+  const socketPath = bridgeSocketPath(directory);
   const requests = [],
     messages = [],
     disconnects = [];

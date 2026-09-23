@@ -9,10 +9,9 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, sep, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const target = "aarch64-apple-darwin";
 const supplementRoot = fileURLToPath(new URL("../licenses/cargo/", import.meta.url));
 
 function cargo(project, args) {
@@ -35,7 +34,7 @@ function cargo(project, args) {
   return result.stdout;
 }
 
-function runtimeCrates(project) {
+function runtimeCrates(project, target) {
   const metadata = JSON.parse(
     cargo(project, ["metadata", "--format-version", "1", "--filter-platform", target]),
   );
@@ -66,7 +65,9 @@ function runtimeCrates(project) {
 }
 
 function readWithin(root, path) {
-  const resolved = relative(realpathSync(root), realpathSync(join(root, path)));
+  const resolved = relative(realpathSync(root), realpathSync(join(root, path)))
+    .split(sep)
+    .join("/");
   if (isAbsolute(resolved) || resolved === ".." || resolved.startsWith("../"))
     throw new Error(`Cargo 许可文件指向包外：${path}`);
   return readFileSync(join(root, path));
@@ -83,7 +84,7 @@ function crateLicenseFiles(root, licenseFile) {
         /^(?:licen[cs]e|copying|notice|copyright)(?:[._-]|$)/i.test(entry.name) &&
         !/\.(?:rs|[cm]?js|ts|c|h|cpp|toml|json)$/i.test(entry.name)
       ) {
-        const file = relative(root, path);
+        const file = relative(root, path).split(sep).join("/");
         found.set(file, { path: file, contents: readWithin(root, file) });
       }
     }
@@ -94,11 +95,11 @@ function crateLicenseFiles(root, licenseFile) {
   return [...found.values()].sort((a, b) => a.path.localeCompare(b.path, "en"));
 }
 
-export function copyCargoLicenses(project, runtime) {
+export function copyCargoLicenses(project, runtime, target = "aarch64-apple-darwin") {
   const supplements = JSON.parse(
     readFileSync(join(supplementRoot, "supplements.json"), "utf8"),
   ).packages;
-  const inventory = runtimeCrates(realpathSync(project)).map((crate) => {
+  const inventory = runtimeCrates(realpathSync(project), target).map((crate) => {
     const key = `${crate.name}@${crate.version}`;
     const root = dirname(crate.manifest_path);
     const vcs = existsSync(join(root, ".cargo_vcs_info.json"))
@@ -149,7 +150,7 @@ export function copyCargoLicenses(project, runtime) {
   const packages = inventory.map(({ files, ...crate }) => ({
     ...crate,
     files: files.map((file) => {
-      const path = join(crate.name, encodeURIComponent(crate.version), file.path);
+      const path = posix.join(crate.name, encodeURIComponent(crate.version), file.path);
       mkdirSync(dirname(join(destination, path)), { recursive: true });
       writeFileSync(join(destination, path), file.contents);
       fileCount++;

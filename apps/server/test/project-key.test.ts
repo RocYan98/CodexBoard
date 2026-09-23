@@ -49,6 +49,15 @@ describe("projectKey", () => {
     );
     expect(() => allocateProjectKey("", new Set())).toThrow("项目根目录必须是绝对路径");
   });
+
+  it("uses the path's syntax rather than the host platform for Windows and UNC roots", () => {
+    const key = allocateProjectKey("C:\\Projects\\CodexBoard", new Set());
+    expect(key).toMatch(/^CO[A-Z]{2}$/);
+    expect(allocateProjectKey("C:/Projects/other/../CodexBoard/", new Set())).toBe(key);
+    expect(allocateProjectKey("c:/projects/CODEXBOARD", new Set())).toBe(key);
+    expect(allocateProjectKey("\\\\server\\share\\CodexBoard", new Set())).toMatch(/^CO[A-Z]{2}$/);
+    expect(() => allocateProjectKey("C:relative", new Set())).toThrow("绝对路径");
+  });
 });
 
 describe("task identifier", () => {

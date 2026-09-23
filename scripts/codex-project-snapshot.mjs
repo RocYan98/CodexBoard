@@ -1,9 +1,7 @@
 import {
-  chmodSync,
   closeSync,
   fsyncSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readFileSync,
   renameSync,
@@ -13,6 +11,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensurePrivateDirectorySync, ensurePrivateFileSync } from "./private-file-permissions.mjs";
 
 function absolutePath(value, label) {
   if (typeof value !== "string" || !isAbsolute(value) || /[\r\n]/.test(value)) {
@@ -96,12 +95,11 @@ function normalizedSnapshot(snapshot) {
 export function writeProjectSnapshot(snapshotFile, snapshot) {
   const path = absolutePath(snapshotFile, "Codex 项目快照文件");
   const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(directory);
   const directoryStat = lstatSync(directory);
   if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
     throw new Error("Codex 项目快照目录必须是普通目录");
   }
-  chmodSync(directory, 0o700);
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   let descriptor;
   try {
@@ -110,7 +108,7 @@ export function writeProjectSnapshot(snapshotFile, snapshot) {
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
-    chmodSync(temporary, 0o600);
+    ensurePrivateFileSync(temporary);
     renameSync(temporary, path);
     // Node cannot fsync directory handles on Windows. The file is still flushed
     // before atomic replacement; directory durability is available on POSIX.

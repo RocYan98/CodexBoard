@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const supplements = {
@@ -20,9 +20,15 @@ function productionPackages(project) {
   // Include the web workspace: Vite embeds its production dependencies even
   // though their node_modules directories are not shipped in the runtime.
   const result = spawnSync(
-    "npm",
+    process.platform === "win32" ? "npm.cmd" : "npm",
     ["ls", "--all", "--omit=dev", "--workspaces", "--include-workspace-root", "--parseable"],
-    { cwd: root, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
+    {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      shell: process.platform === "win32",
+      windowsHide: true,
+    },
   );
   if (result.status !== 0)
     throw new Error("无法读取第三方生产依赖，请先 npm ci 并修复 npm ls 报告的问题", {
@@ -31,7 +37,7 @@ function productionPackages(project) {
 
   const packages = [];
   for (const line of new Set(result.stdout.split(/\r?\n/).filter(Boolean))) {
-    const path = relative(root, resolve(line));
+    const path = relative(root, resolve(line)).split(sep).join("/");
     if (path === "") continue;
     const meta = lock.packages[path];
     if (isAbsolute(path) || path === ".." || path.startsWith("../") || !meta)
@@ -62,10 +68,13 @@ function licenseFiles(directory) {
       const path = join(current, entry.name);
       if (entry.isDirectory()) visit(path, insideLicenses || licenseName.test(entry.name));
       else if (insideLicenses || licenseName.test(entry.name)) {
-        const resolved = relative(realpathSync(directory), realpathSync(path));
+        const resolved = relative(realpathSync(directory), realpathSync(path)).split(sep).join("/");
         if (isAbsolute(resolved) || resolved === ".." || resolved.startsWith("../"))
           throw new Error(`第三方许可文件指向包外：${path}`);
-        files.push({ path: relative(directory, path), contents: readFileSync(path) });
+        files.push({
+          path: relative(directory, path).split(sep).join("/"),
+          contents: readFileSync(path),
+        });
       }
     }
   }
@@ -149,7 +158,7 @@ export function copyThirdPartyLicenses(project, runtime) {
     const { files, ...metadata } = entry;
     const copied = [];
     for (const file of files) {
-      const path = join(entry.name, encodeURIComponent(entry.version), file.path);
+      const path = posix.join(entry.name, encodeURIComponent(entry.version), file.path);
       const target = join(destination, path);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, file.contents);

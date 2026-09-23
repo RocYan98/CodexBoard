@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ensurePrivateDirectorySync } from "../../../scripts/private-file-permissions.mjs";
 import {
   CreateCommentCommandSchema,
   CreateTaskCommandSchema,
@@ -282,7 +283,7 @@ it("snapshots description and attachment-only comment files with usable download
   }[]) {
     expect(prompt).toContain(attachment.filename);
     expect(prompt).toContain(`/api/v1/local/attachments/${attachment.id}`);
-    expect(attachment.downloadCommand).toContain(
+    expect(attachment.downloadCommand.replaceAll("\\", "/")).toContain(
       `/.tmp/taskboard/${s.task.id}/attachment-${attachment.id}`,
     );
     expect(s.service.open(attachment.id, actor).bytes.toString()).toBe("attachment content");
@@ -385,7 +386,7 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
     downloadPath: string;
   }[];
   const command = snapshot[0]!.downloadCommand;
-  expect(command).toContain("/packages/taskctl/dist/cli.js'");
+  expect(command.replaceAll("\\", "/")).toContain("/packages/taskctl/dist/cli.js'");
   expect(command).toContain(`CODEXBOARD_DATA_DIR='${s.root}'`);
   const capabilityToken = "a".repeat(64);
   const cliAuth = new CliAuthService({
@@ -412,6 +413,7 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
   mkdirSync(join(s.root, "run"));
+  ensurePrivateDirectorySync(join(s.root, "run"));
   const runtime: RuntimeDescriptor = {
     descriptorVersion: 1,
     pid: process.pid,
@@ -432,6 +434,17 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
     const execute = () =>
       promisify(exec)(command, {
         cwd: tmpdir(),
+        ...(process.platform === "win32"
+          ? {
+              shell: join(
+                process.env.SystemRoot ?? "C:\\Windows",
+                "System32",
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe",
+              ),
+            }
+          : {}),
         env: { ...process.env, PATH: "/nonexistent", CODEXBOARD_AUTH_FILE: authFile },
       });
     await expect(execute()).rejects.toMatchObject({ code: 1 });

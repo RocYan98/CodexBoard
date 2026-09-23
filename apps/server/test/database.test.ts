@@ -1,3 +1,4 @@
+import { assertPrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -324,7 +325,8 @@ describe("SQLite foundation", () => {
     const database = track(initializeDatabase(filename));
 
     expect(database.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(statSync(filename).mode & 0o777).toBe(0o600);
+    assertPrivateFileSync(filename);
+    if (process.platform !== "win32") expect(statSync(filename).mode & 0o777).toBe(0o600);
   });
 
   it("upgrades existing parent relations to multiple children while retaining one parent per child", () => {

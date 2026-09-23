@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  assertPrivateFileSync,
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "./private-file-permissions.mjs";
 
 import { REMOTE_UPLOAD_MAX_BYTES } from "@codexboard/contracts";
 const maxBytes = REMOTE_UPLOAD_MAX_BYTES;
@@ -24,6 +29,7 @@ function directory(home, ownerKey, id) {
 async function regular(path) {
   const stat = await lstat(path);
   if (!stat.isFile() || stat.size > maxBytes) throw new Error("附件不可用");
+  assertPrivateFileSync(path);
   return readFile(path);
 }
 function imageMime(bytes) {
@@ -62,10 +68,7 @@ export async function storeRemoteUpload(home, { ownerKey, id, name, mimeType, ba
     sha256: hash(bytes),
     image: !!detected,
   };
-  await mkdir(join(home, "taskboard", "remote-uploads", ownerKey), {
-    recursive: true,
-    mode: 0o700,
-  });
+  ensurePrivateDirectorySync(join(home, "taskboard", "remote-uploads", ownerKey));
   try {
     await mkdir(dir, { mode: 0o700 });
   } catch (error) {
@@ -75,12 +78,15 @@ export async function storeRemoteUpload(home, { ownerKey, id, name, mimeType, ba
       throw new Error("附件编号已使用，请重新选择文件", { cause: error });
     return { id, name, mimeType: existing.mimeType, size: existing.size };
   }
+  ensurePrivateDirectorySync(dir);
   const storageName = "attachment";
   await writeFile(join(dir, storageName), bytes, { flag: "wx", mode: 0o600 });
+  ensurePrivateFileSync(join(dir, storageName));
   await writeFile(join(dir, "metadata.json"), JSON.stringify({ ...metadata, storageName }), {
     flag: "wx",
     mode: 0o600,
   });
+  ensurePrivateFileSync(join(dir, "metadata.json"));
   return { id, name, mimeType: metadata.mimeType, size: metadata.size };
 }
 

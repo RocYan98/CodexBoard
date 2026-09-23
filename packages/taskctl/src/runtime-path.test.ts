@@ -5,7 +5,9 @@ import { expect, it } from "vitest";
 import { runtimeDataDirectory } from "./runtime-path.js";
 
 it("uses cwd/.data for source commands and preserves explicit empty new settings", () => {
-  expect(runtimeDataDirectory({}, "/fake/home", "/fake/project")).toBe("/fake/project/.data");
+  expect(runtimeDataDirectory({}, "/fake/home", "/fake/project")).toBe(
+    join("/fake/project", ".data"),
+  );
   expect(() =>
     runtimeDataDirectory({ CODEXBOARD_DATA_DIR: "", LARK_TASKBOARD_DATA_DIR: "/old" }),
   ).toThrow("CODEXBOARD_DATA_DIR 不能为空");

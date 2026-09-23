@@ -8,14 +8,17 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export function listRuntimeDependencyPaths(project) {
+export function listRuntimeDependencyPaths(
+  project,
+  target = { platform: process.platform, arch: process.arch },
+) {
   // npm resolves hoisting, workspace links and transitive/optional dependencies.
   // The frontend is already bundled by Vite and does not need its npm tree here.
   const root = realpathSync(project);
   const result = spawnSync(
-    "npm",
+    process.platform === "win32" ? "npm.cmd" : "npm",
     [
       "ls",
       "--all",
@@ -26,7 +29,13 @@ export function listRuntimeDependencyPaths(project) {
       "--include-workspace-root",
       "--parseable",
     ],
-    { cwd: root, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
+    {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      shell: process.platform === "win32",
+      windowsHide: true,
+    },
   );
   if (result.status !== 0)
     throw new Error("无法读取生产依赖，请先 npm ci 并修复 npm ls 报告的问题", {
@@ -35,7 +44,7 @@ export function listRuntimeDependencyPaths(project) {
   const lock = JSON.parse(readFileSync(join(project, "package-lock.json"), "utf8"));
   const paths = new Set();
   for (const line of result.stdout.split(/\r?\n/).filter(Boolean)) {
-    const path = relative(root, resolve(line));
+    const path = relative(root, resolve(line)).split(sep).join("/");
     if (path === "" || ["apps/server", "packages/contracts", "packages/taskctl"].includes(path))
       continue;
     const meta = lock.packages[path];
@@ -48,7 +57,8 @@ export function listRuntimeDependencyPaths(project) {
       throw new Error(`生产依赖路径不在 lockfile 中：${path}`);
     if (meta.link) continue;
     if (meta.dev) throw new Error(`生产依赖列表意外包含开发依赖：${path}`);
-    if (!supportsPlatform(meta.os, "darwin") || !supportsPlatform(meta.cpu, "arm64")) continue;
+    if (!supportsPlatform(meta.os, target.platform) || !supportsPlatform(meta.cpu, target.arch))
+      continue;
     if (!existsSync(join(project, path))) {
       if (meta.optional) continue;
       throw new Error(`缺少生产依赖 ${path}，请先 npm ci`);
@@ -62,6 +72,7 @@ export function copyRuntimeDependencies(
   project,
   runtime,
   paths = listRuntimeDependencyPaths(project),
+  target = { platform: process.platform, arch: process.arch },
 ) {
   for (const path of paths) {
     const source = join(project, path);
@@ -70,7 +81,8 @@ export function copyRuntimeDependencies(
     // better-sqlite3 prefers this shipped native binary. npm may still leave
     // node-gyp metadata containing local paths; none of that build tree is used.
     const omitSqliteBuild =
-      packageName === "better-sqlite3" && existsSync(join(source, "prebuilds/darwin-arm64.node"));
+      packageName === "better-sqlite3" &&
+      existsSync(join(source, `prebuilds/${target.platform}-${target.arch}.node`));
     mkdirSync(dirname(destination), { recursive: true });
     cpSync(source, destination, {
       recursive: true,
@@ -94,6 +106,7 @@ function supportsPlatform(values, target) {
 export const RUNTIME_SCRIPT_FILES = Object.freeze([
   "codex-desktop-loader.mjs",
   "codex-desktop-session.mjs",
+  "codex-local-endpoint.mjs",
   "codex-project-snapshot.mjs",
   "codex-remote-image.mjs",
   "codex-remote-queue.mjs",
@@ -102,7 +115,9 @@ export const RUNTIME_SCRIPT_FILES = Object.freeze([
   "codex-session-bridge.mjs",
   "codex-task-progress.mjs",
   "codex-thread-title.mjs",
+  "codex-windows-app.mjs",
   "git-origin-reader.mjs",
+  "private-file-permissions.mjs",
   "run-codex-app-server.mjs",
 ]);
 

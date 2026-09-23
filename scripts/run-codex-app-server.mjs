@@ -2,6 +2,7 @@ import { createCodexSessionBridge } from "./codex-session-bridge.mjs";
 import { accessSync, constants, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertPrivateFileSync } from "./private-file-permissions.mjs";
 
 import {
   readCodexDesktopProjects,
@@ -24,10 +25,7 @@ export function validateCodexBridgeOptions(options) {
   }
   accessSync(codexPath, constants.X_OK);
   if (!isAbsolute(tokenFile)) throw new Error("Codex Token 文件必须是绝对路径");
-  const tokenStat = lstatSync(tokenFile);
-  if (!tokenStat.isFile() || tokenStat.isSymbolicLink() || (tokenStat.mode & 0o077) !== 0) {
-    throw new Error("Codex Token 文件必须是权限不宽于 0600 的普通文件");
-  }
+  assertPrivateFileSync(tokenFile);
   if (!readFileSync(tokenFile, "utf8").trim()) throw new Error("Codex Token 文件为空");
   if (!isAbsolute(projectStateFile)) throw new Error("Codex 项目状态文件必须是绝对路径");
   const projectStateStat = lstatSync(projectStateFile);

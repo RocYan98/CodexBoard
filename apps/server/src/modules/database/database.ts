@@ -1,4 +1,8 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../../../scripts/private-file-permissions.mjs";
+import { existsSync, lstatSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import Database from "better-sqlite3";
@@ -17,7 +21,7 @@ export function openDatabase(filename: string): SqliteDatabase {
   const resolvedFilename = memory ? filename : resolve(filename);
 
   if (!memory) {
-    mkdirSync(dirname(resolvedFilename), { recursive: true, mode: 0o700 });
+    ensurePrivateDirectorySync(dirname(resolvedFilename));
   }
 
   const existed = memory || existsSync(resolvedFilename);
@@ -41,7 +45,7 @@ export function openDatabase(filename: string): SqliteDatabase {
       if (stat.isSymbolicLink() || !stat.isFile()) {
         throw new Error("SQLite 数据库必须是不含符号链接的普通文件");
       }
-      chmodSync(resolvedFilename, 0o600);
+      ensurePrivateFileSync(resolvedFilename);
     }
 
     return database;

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::{
     io::{Read, Write},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{atomic::Ordering, Mutex},
     time::{Duration, Instant},
 };
@@ -47,7 +47,7 @@ fn run(app: &tauri::AppHandle, action: &str, options: Value) -> Result<Value, St
         .map_err(|_| "无法定位应用资源")?
         .join("runtime");
     let executable = tauri::process::current_binary(&app.env()).map_err(|_| "无法定位当前应用")?;
-    let mut child = Command::new(runtime.join("bin/node"))
+    let mut child = crate::quiet_command(crate::node_path(&runtime))
         .arg(runtime.join("desktop/skill-manager.mjs"))
         .arg(action)
         .arg(&runtime)
@@ -158,7 +158,7 @@ pub fn handle_commit_cli() -> Option<i32> {
         if args.len() != 6 {
             return Err("invalid arguments");
         }
-        let home = PathBuf::from(std::env::var_os("HOME").ok_or("missing HOME")?);
+        let home = PathBuf::from(crate::user_home().ok_or("missing user home")?);
         let expected = if args[4] == "-" && args[5] == "-" {
             None
         } else {

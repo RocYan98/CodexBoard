@@ -1,5 +1,9 @@
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../../../scripts/private-file-permissions.mjs";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import Database from "better-sqlite3";
@@ -12,12 +16,11 @@ export interface DataDirectoryLock {
 }
 
 function ensurePrivateDirectory(path: string, label: string): void {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(path);
   const stat = lstatSync(path);
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     throw new Error(`${label}必须是不含符号链接的目录`);
   }
-  chmodSync(path, 0o700);
 }
 
 function assertSafeLockDatabase(path: string): void {
@@ -62,7 +65,7 @@ export function acquireDataDirectoryLock(
   const token = randomUUID();
   try {
     database = new Database(lockPath);
-    chmodSync(lockPath, 0o600);
+    ensurePrivateFileSync(lockPath);
     database.pragma("busy_timeout = 0");
     database.pragma("journal_mode = DELETE");
     database.exec(`CREATE TABLE IF NOT EXISTS lock_owner (

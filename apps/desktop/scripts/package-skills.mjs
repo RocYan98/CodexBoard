@@ -8,7 +8,7 @@ const bundledFiles = [
   ["scripts/taskctl.sh", 0o755],
 ];
 
-export function copyBundledSkill(project, runtime, version) {
+export function copyBundledSkill(project, runtime, version, platform = process.platform) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version))
     throw new Error("Skill 发布版本需要稳定版本号（例如 0.1.1）");
   const source = join(project, "skills", skillName);
@@ -18,7 +18,15 @@ export function copyBundledSkill(project, runtime, version) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Skill 源目录无效");
   }
   const manifest = { schemaVersion: 1, name: skillName, version, files: [] };
-  for (const [path, mode] of bundledFiles) {
+  const files =
+    platform === "win32"
+      ? [
+          ["SKILL.md", 0o644],
+          ["scripts/taskctl.ps1", 0o644],
+          ["scripts/taskctl.cmd", 0o644],
+        ]
+      : bundledFiles;
+  for (const [path, mode] of files) {
     const file = join(source, path);
     const stat = lstatSync(file);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Skill 文件无效：${path}`);

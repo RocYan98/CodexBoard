@@ -15,6 +15,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
+import { isWindowsPipePath, localEndpointPath } from "./codex-local-endpoint.mjs";
 
 export function buildCodexArguments() {
   return ["app-server", "--listen", "stdio://"];
@@ -26,10 +27,21 @@ export async function createCodexSessionBridge({
   endpoint,
   token,
   desktopSessionConnector = loadDesktopSession,
+  spawnProcess = spawn,
 }) {
+  const local = endpoint.startsWith("unix://") || endpoint.startsWith("npipe://");
+  const address = local ? localEndpointPath(endpoint) : new URL(endpoint);
+  const pipe = local && isWindowsPipePath(address);
+  if (pipe && !token) throw new Error("Windows Codex 桥接需要认证令牌");
   const candidates = isAbsolute(codexPath)
     ? [codexPath]
-    : (process.env.PATH ?? "").split(delimiter).map((directory) => join(directory, codexPath));
+    : (process.env.PATH ?? "")
+        .split(delimiter)
+        .flatMap((directory) =>
+          process.platform === "win32" && !codexPath.toLowerCase().endsWith(".exe")
+            ? [join(directory, `${codexPath}.exe`), join(directory, codexPath)]
+            : [join(directory, codexPath)],
+        );
   codexPath = candidates.find((candidate) => {
     try {
       accessSync(candidate, constants.X_OK);
@@ -100,7 +112,9 @@ export async function createCodexSessionBridge({
     });
 
     function makeWorker() {
-      const child = spawn(codexPath, buildCodexArguments(), { stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawnProcess(codexPath, buildCodexArguments(), {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
       const pending = new Map();
       let nextId = 0;
       let stopping;
@@ -171,7 +185,12 @@ export async function createCodexSessionBridge({
         },
         stop() {
           stopping ??= (async () => {
-            if (!exited) child.kill("SIGTERM");
+            if (!exited) {
+              // Windows SIGTERM terminates immediately. EOF lets the stdio
+              // helper release its own locks before the existing kill deadline.
+              if (process.platform === "win32") child.stdin.end();
+              else child.kill("SIGTERM");
+            }
             const timeout = setTimeout(() => {
               if (!exited) child.kill("SIGKILL");
             }, 5000);
@@ -581,16 +600,14 @@ export async function createCodexSessionBridge({
         });
     });
   });
-  const unix = endpoint.startsWith("unix://");
-  const address = unix ? endpoint.slice(7) : new URL(endpoint);
   await new Promise((resolveListen, reject) => {
     server.once("error", reject);
-    if (unix) server.listen(address, resolveListen);
+    if (local) server.listen(address, resolveListen);
     else server.listen(Number(address.port || 80), address.hostname, resolveListen);
   });
-  if (unix) chmodSync(address, 0o600);
+  if (local && !pipe) chmodSync(address, 0o600);
   return {
-    endpoint: unix ? endpoint : `ws://127.0.0.1:${server.address().port}`,
+    endpoint: local ? endpoint : `ws://127.0.0.1:${server.address().port}`,
     async close() {
       closing = true;
       await Promise.all([...connections].map((stop) => stop()));
@@ -604,10 +621,21 @@ export async function createCodexSessionBridge({
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const codexPath = process.argv[process.argv.indexOf("--codex") + 1];
   const endpoint = process.argv[process.argv.indexOf("--listen") + 1];
-  if (!codexPath || !endpoint?.startsWith("unix://"))
-    throw new Error("Expected --codex and a unix --listen endpoint");
+  if (!codexPath || (!endpoint?.startsWith("unix://") && !endpoint?.startsWith("npipe://")))
+    throw new Error("Expected --codex and a local --listen endpoint");
   try {
-    const bridge = await createCodexSessionBridge({ codexPath, endpoint });
+    const token = process.env.CODEXBOARD_BRIDGE_TOKEN;
+    delete process.env.CODEXBOARD_BRIDGE_TOKEN;
+    const bridge = await createCodexSessionBridge({ codexPath, endpoint, token });
+    if (endpoint.startsWith("npipe://")) {
+      process.stdout.write("CODEXBOARD_BRIDGE_READY\n");
+      // The owning supervisor closes stdin for graceful Windows shutdown;
+      // Windows process signals otherwise terminate without running handlers.
+      process.stdin.once("end", () => {
+        void bridge.close();
+      });
+      process.stdin.resume();
+    }
     for (const signal of ["SIGTERM", "SIGINT"])
       process.once(signal, () => {
         void bridge.close();

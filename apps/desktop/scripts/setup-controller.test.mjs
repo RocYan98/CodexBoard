@@ -99,6 +99,7 @@ test("failed checks always clear busy state and suppress raw error content", asy
 test("opening setup targets uses a fixed allowlist and opens only installed Codex apps", async () => {
   const calls = [];
   const deps = {
+    platform: "darwin",
     execute: async (...args) => calls.push(args),
     exists: (path) => path === "/Applications/ChatGPT.app",
   };
@@ -114,13 +115,40 @@ test("opening setup targets uses a fixed allowlist and opens only installed Code
 test("Codex detection can discover a new installation without restarting the desktop app", () => {
   const installed = new Set();
   assert.equal(
-    detectCodexPath((path) => installed.has(path)),
+    detectCodexPath((path) => installed.has(path), { platform: "darwin" }),
     "/Applications/Codex.app/Contents/Resources/codex",
   );
   installed.add("/Applications/ChatGPT.app/Contents/Resources/codex");
   assert.equal(
-    detectCodexPath((path) => installed.has(path)),
+    detectCodexPath((path) => installed.has(path), { platform: "darwin" }),
     "/Applications/ChatGPT.app/Contents/Resources/codex",
+  );
+});
+
+test("Windows setup uses the registered app CLI and activation identity", async () => {
+  const app = {
+    cliPath: "C:\\Program Files\\WindowsApps\\Codex\\app\\resources\\codex.exe",
+    appUserModelId: "OpenAI.Codex_2p2nqsd0c76g0!App",
+  };
+  const calls = [];
+  const deps = {
+    platform: "win32",
+    findWindowsPackage: () => app,
+    execute: async (...args) => calls.push(args),
+  };
+  assert.equal(
+    detectCodexPath(() => true, deps),
+    app.cliPath,
+  );
+  await openSetupTarget("codex-app", deps);
+  assert.equal(calls[0][0], "explorer.exe");
+  assert.deepEqual(calls[0][1], [`shell:AppsFolder\\${app.appUserModelId}`]);
+  await openSetupTarget("codex-download", deps);
+  assert.equal(calls[1][0], "powershell.exe");
+  assert.match(calls[1][1].at(-1), /https:\/\/developers\.openai\.com\/codex\/app\//);
+  await assert.rejects(
+    openSetupTarget("codex-app", { ...deps, findWindowsPackage: () => undefined }),
+    /安装/,
   );
 });
 

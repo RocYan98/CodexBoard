@@ -1,9 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
+import {
+  assertPrivateDirectorySync,
+  assertPrivateFileSync,
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../scripts/private-file-permissions.mjs";
 import {
   UserIdentityRefSchema,
   normalizeCodexBoardEnvironment,
@@ -114,18 +120,34 @@ export function credentialPaths(runtime: RuntimeDescriptor, base: string) {
 export const defaultCredentialStore: CredentialStore = {
   async read(path) {
     try {
+      const entry = await lstat(path);
+      if (!entry.isFile() || entry.isSymbolicLink()) throw new Error("unsafe credential entry");
       const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
         const stat = await file.stat();
         if (
           !stat.isFile() ||
-          (stat.mode & 0o777) !== 0o600 ||
+          (process.platform !== "win32" && (stat.mode & 0o777) !== 0o600) ||
           (process.getuid && stat.uid !== process.getuid())
         )
           throw new TaskctlAuthError(
             "CLI_AUTH_FILE_PERMISSIONS",
             "CLI 凭据文件必须由当前用户拥有且权限为 0600",
           );
+        if (process.platform === "win32") {
+          try {
+            assertPrivateFileSync(resolve(path));
+            const checked = await lstat(path);
+            if (checked.ino !== stat.ino || checked.dev !== stat.dev || checked.isSymbolicLink()) {
+              throw new Error("credential changed during validation");
+            }
+          } catch {
+            throw new TaskctlAuthError(
+              "CLI_AUTH_FILE_PERMISSIONS",
+              "CLI 凭据文件必须仅允许当前用户访问",
+            );
+          }
+        }
         return await file.readFile("utf8");
       } finally {
         await file.close();
@@ -137,11 +159,17 @@ export const defaultCredentialStore: CredentialStore = {
     }
   },
   async write(path, value) {
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const created = await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform === "win32") {
+      // Never rewrite permissions on an arbitrary pre-existing parent directory.
+      if (created !== undefined) ensurePrivateDirectorySync(resolve(dirname(path)));
+      else assertPrivateDirectorySync(resolve(dirname(path)));
+    }
     const temporary = `${path}.${randomUUID()}.tmp`;
     try {
       const file = await open(temporary, "wx", 0o600);
       try {
+        if (process.platform === "win32") ensurePrivateFileSync(resolve(temporary));
         await file.writeFile(value, "utf8");
         await file.sync();
       } finally {

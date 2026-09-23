@@ -1,12 +1,15 @@
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../../../scripts/private-file-permissions.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
   copyFileSync,
   existsSync,
   lstatSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readSync,
@@ -111,13 +114,13 @@ function listFiles(root: string): string[] {
 }
 
 function copyAttachmentTree(sourceRoot: string, destinationRoot: string): void {
-  mkdirSync(destinationRoot, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(destinationRoot);
   for (const source of listFiles(sourceRoot)) {
     const path = safeRelativePath(sourceRoot, source);
     const destination = join(destinationRoot, ...path.split("/"));
-    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    ensurePrivateDirectorySync(dirname(destination));
     copyFileSync(source, destination);
-    chmodSync(destination, 0o600);
+    ensurePrivateFileSync(destination);
   }
 }
 
@@ -219,19 +222,19 @@ function preserveCorruptCurrentArtifact(
   hooks: RestoreDurabilityHooks,
 ): CorruptCurrentArtifact {
   const backupRoot = assertNoSymlinkComponents(join(dataDirectory, "backups"), "恢复工件目录");
-  mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(backupRoot);
   assertNoSymlinkComponents(backupRoot, "恢复工件目录");
   const destination = assertNoSymlinkComponents(
     corruptArtifactDestination(dataDirectory, createdAt),
     "恢复工件",
   );
   const staging = `${destination}.partial-${randomUUID()}`;
-  mkdirSync(staging, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(staging);
   const databaseDestination = join(staging, "taskboard.sqlite");
   const metadataDestination = join(staging, "artifact.json");
   try {
     copyFileSync(sourcePath, databaseDestination);
-    chmodSync(databaseDestination, 0o600);
+    ensurePrivateFileSync(databaseDestination);
     if (statSync(databaseDestination).size !== size || sha256(databaseDestination) !== checksum) {
       throw new Error("损坏数据库工件校验失败");
     }
@@ -247,6 +250,7 @@ function preserveCorruptCurrentArtifact(
       })}\n`,
       { mode: 0o600 },
     );
+    ensurePrivateFileSync(metadataDestination);
     const synchronize = hooks.syncPath ?? syncDurablePath;
     syncDurableTree(staging, synchronize);
     (hooks.renamePath ?? renameSync)(staging, destination);
@@ -273,11 +277,12 @@ function verifyPayload(directory: string, manifest: BackupManifest): void {
     throw new Error("数据库备份校验失败");
   }
   const inspectionDirectory = mkdtempSync(join(tmpdir(), "codexboard-verify-"));
+  ensurePrivateDirectorySync(inspectionDirectory);
   const inspectionPath = join(inspectionDirectory, "taskboard.sqlite");
   let database: Database.Database | undefined;
   try {
     copyFileSync(databasePath, inspectionPath);
-    chmodSync(inspectionPath, 0o600);
+    ensurePrivateFileSync(inspectionPath);
     database = new Database(inspectionPath, { readonly: true, fileMustExist: true });
     const integrity = database.pragma("integrity_check", { simple: true });
     if (integrity !== "ok") throw new Error("SQLite 完整性校验失败");
@@ -351,7 +356,7 @@ export class BackupService {
   constructor(options: BackupServiceOptions) {
     this.#database = options.database;
     const dataDirectory = assertNoSymlinkComponents(resolve(options.dataDirectory), "数据根目录");
-    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    ensurePrivateDirectorySync(dataDirectory);
     this.#dataDirectory = assertNoSymlinkComponents(dataDirectory, "数据根目录");
     const dataStat = lstatSync(this.#dataDirectory);
     if (dataStat.isSymbolicLink() || !dataStat.isDirectory()) {
@@ -380,15 +385,17 @@ export class BackupService {
     }
     if (existsSync(resolvedDestination)) throw new Error("备份目标已存在");
     assertNoSymlinkComponents(destinationParent, "备份目标父目录");
+    // The user can choose an existing shared backup parent. Keep its ACL;
+    // only the application-owned staging tree below it must be private.
     mkdirSync(destinationParent, { recursive: true, mode: 0o700 });
     assertNoSymlinkComponents(destinationParent, "备份目标父目录");
     const staging = `${resolvedDestination}.partial-${randomUUID()}`;
-    mkdirSync(staging, { recursive: true, mode: 0o700 });
+    ensurePrivateDirectorySync(staging);
     let published = false;
     try {
       const databasePath = join(staging, "taskboard.sqlite");
       await this.#database.backup(databasePath);
-      chmodSync(databasePath, 0o600);
+      ensurePrivateFileSync(databasePath);
       const backupAttachments = join(staging, "attachments");
       copyAttachmentTree(sourceAttachments, backupAttachments);
       const manifest = BackupManifestSchema.parse({
@@ -408,6 +415,7 @@ export class BackupService {
       });
       const manifestPath = join(staging, "manifest.json");
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+      ensurePrivateFileSync(manifestPath);
       verifyPayload(staging, manifest);
       const synchronize = this.#durabilityHooks.syncPath ?? syncDurablePath;
       syncDurableTree(staging, synchronize);
@@ -507,10 +515,10 @@ export class BackupService {
     };
     writeRestoreJournal(resolvedDataDirectory, restoreJournal);
     try {
-      mkdirSync(staging, { recursive: true, mode: 0o700 });
-      mkdirSync(rollback, { recursive: true, mode: 0o700 });
+      ensurePrivateDirectorySync(staging);
+      ensurePrivateDirectorySync(rollback);
       copyFileSync(join(resolvedSource, "taskboard.sqlite"), join(staging, "taskboard.sqlite"));
-      chmodSync(join(staging, "taskboard.sqlite"), 0o600);
+      ensurePrivateFileSync(join(staging, "taskboard.sqlite"));
       copyAttachmentTree(join(resolvedSource, "attachments"), join(staging, "attachments"));
       const move = durabilityHooks.renamePath ?? renameSync;
       move(currentDatabasePath, join(rollback, "taskboard.sqlite"));
@@ -521,8 +529,8 @@ export class BackupService {
       makeRestoreRollbackDurable(resolvedDataDirectory, restoreJournal, durabilityHooks);
       move(join(staging, "taskboard.sqlite"), currentDatabasePath);
       move(join(staging, "attachments"), currentAttachments);
-      chmodSync(currentDatabasePath, 0o600);
-      chmodSync(currentAttachments, 0o700);
+      ensurePrivateFileSync(currentDatabasePath);
+      ensurePrivateDirectorySync(currentAttachments);
       verifyPayload(resolvedDataDirectory, manifest);
       finalizeRestoreJournal(resolvedDataDirectory, durabilityHooks);
     } catch (error: unknown) {

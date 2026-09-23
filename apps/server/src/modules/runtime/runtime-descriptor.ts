@@ -1,9 +1,11 @@
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../../../scripts/private-file-permissions.mjs";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
-  chmodSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -51,8 +53,7 @@ export function publishRuntimeDescriptor(
     if (existsSync(runDirectory) && lstatSync(runDirectory).isSymbolicLink()) {
       throw new AppError("CONFIG_INVALID", 500, "运行时目录不能是符号链接");
     }
-    mkdirSync(runDirectory, { recursive: true, mode: 0o700 });
-    chmodSync(runDirectory, 0o700);
+    ensurePrivateDirectorySync(runDirectory);
 
     const descriptor = RuntimeDescriptorSchema.parse({
       descriptorVersion: 1,
@@ -67,8 +68,8 @@ export function publishRuntimeDescriptor(
       flag: "wx",
       mode: 0o600,
     });
+    ensurePrivateFileSync(temporaryPath);
     renameSync(temporaryPath, descriptorPath);
-    chmodSync(descriptorPath, 0o600);
 
     return {
       path: descriptorPath,

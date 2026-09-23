@@ -2,7 +2,7 @@ import { remoteTurnDiff } from "@codexboard/contracts";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, open, readlink, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
@@ -50,6 +50,7 @@ function validPath(path) {
     path.length > 0 &&
     path.length < 4096 &&
     !isAbsolute(path) &&
+    !(process.platform === "win32" && path.includes("\\")) &&
     !path.includes("\0") &&
     !path.split("/").some((part) => part === ".." || part === "." || part === ".git")
   );
@@ -67,7 +68,7 @@ async function currentContent(root, path) {
   }
   const parent = await realpath(dirname(absolute));
   const parentPath = relative(root, parent);
-  if (parentPath === ".." || parentPath.startsWith("../") || isAbsolute(parentPath))
+  if (parentPath === ".." || parentPath.startsWith(`..${sep}`) || isAbsolute(parentPath))
     throw new Error("文件不在任务仓库中");
   if (info.isSymbolicLink())
     return {
@@ -92,7 +93,17 @@ async function currentContent(root, path) {
   );
   try {
     const actual = await file.stat();
-    if (!actual.isFile() || actual.size > MAX_CONTENT) throw new Error("文件已变化，请刷新重试");
+    const checked = await lstat(absolute);
+    if (
+      !actual.isFile() ||
+      actual.size > MAX_CONTENT ||
+      actual.ino !== info.ino ||
+      actual.dev !== info.dev ||
+      checked.isSymbolicLink() ||
+      checked.ino !== actual.ino ||
+      checked.dev !== actual.dev
+    )
+      throw new Error("文件已变化，请刷新重试");
     const bytes = Buffer.alloc(actual.size);
     let offset = 0;
     while (offset < bytes.length) {

@@ -2,13 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseEnv, nativeEnvironment, assertPortsFree, stopChildren } from "./runtime.mjs";
 import net from "node:net";
+import { join, resolve } from "node:path";
+import { runtimeBinary, runtimeEnvironment } from "./runtime.mjs";
 test("configured ports reach the backend, admin listener and embedded bridge", () => {
-  const result = nativeEnvironment({}, { CODEXBOARD_DATA_DIR: "/data" }, "/bundle", {
-    api: 48023,
-    admin: 48024,
-    bridge: 48025,
-    caddy: 9443,
-  });
+  const result = nativeEnvironment(
+    {},
+    { CODEXBOARD_DATA_DIR: resolve("/data") },
+    resolve("/bundle"),
+    {
+      api: 48023,
+      admin: 48024,
+      bridge: 48025,
+      caddy: 9443,
+    },
+  );
   assert.equal(result.CODEXBOARD_PORT, "48023");
   assert.equal(result.CODEXBOARD_ADMIN_PORT, "48024");
   assert.equal(result.CODEXBOARD_CODEX_ENDPOINT, "ws://127.0.0.1:48025");
@@ -27,20 +34,22 @@ test("native config replaces container paths without leaking inherited secrets",
       CODEXBOARD_CODEX_PROJECT_SNAPSHOT_FILE: "/var/lib/codexboard/run/codex-projects.json",
     },
     {
-      CODEXBOARD_DATA_DIR: "/Users/example/data",
+      CODEXBOARD_DATA_DIR: resolve("/Users/example/data"),
       CODEXBOARD_FEISHU_CREDENTIALS_FILE: "/secrets/feishu",
       CODEXBOARD_CODEX_TOKEN_FILE: "/secrets/codex",
     },
-    "/app/runtime",
+    resolve("/app/runtime"),
   );
   assert.equal(result.CODEXBOARD_CODEX_TRANSPORT, "embedded");
-  assert.ok(result.CODEXBOARD_CODEX_PROJECT_STATE_FILE.endsWith(".codex/.codex-global-state.json"));
+  assert.ok(
+    result.CODEXBOARD_CODEX_PROJECT_STATE_FILE.endsWith(join(".codex", ".codex-global-state.json")),
+  );
   assert.equal(result.CODEXBOARD_CODEX_ENDPOINT, "ws://127.0.0.1:58980");
   assert.equal(
     result.CODEXBOARD_CODEX_PROJECT_SNAPSHOT_FILE,
-    "/Users/example/data/run/codex-projects.json",
+    resolve("/Users/example/data/run/codex-projects.json"),
   );
-  assert.equal(result.CODEXBOARD_WEB_ROOT, "/app/runtime/apps/web/dist");
+  assert.equal(result.CODEXBOARD_WEB_ROOT, resolve("/app/runtime/apps/web/dist"));
   assert.equal(result.CODEXBOARD_FEISHU_CREDENTIALS_FILE, "/secrets/feishu");
 });
 test("occupied ports are rejected without stopping their owner", async () => {
@@ -58,11 +67,14 @@ import { spawn } from "node:child_process";
 test("native task execution uses bundled CLI instead of Docker", () => {
   const env = nativeEnvironment(
     { CODEXBOARD_EXECUTOR_TASKCTL_PATH: "/old/taskctl-docker.mjs" },
-    { CODEXBOARD_DATA_DIR: "/data", CODEXBOARD_WORKSPACE_ROOT: "/project" },
-    "/bundle",
+    { CODEXBOARD_DATA_DIR: resolve("/data"), CODEXBOARD_WORKSPACE_ROOT: "/project" },
+    resolve("/bundle"),
   );
-  assert.equal(env.CODEXBOARD_EXECUTOR_TASKCTL_PATH, "/bundle/packages/taskctl/dist/cli.js");
-  assert.equal(env.CODEXBOARD_EXECUTOR_NODE_PATH, "/bundle/bin/node");
+  assert.equal(
+    env.CODEXBOARD_EXECUTOR_TASKCTL_PATH,
+    resolve("/bundle/packages/taskctl/dist/cli.js"),
+  );
+  assert.equal(env.CODEXBOARD_EXECUTOR_NODE_PATH, runtimeBinary(resolve("/bundle"), "node"));
   assert.equal(env.CODEXBOARD_WORKSPACE_ROOTS, "/project");
 });
 test("stopping services waits for owned children and leaves unrelated processes alone", async () => {
@@ -84,29 +96,33 @@ test("stopping services waits for owned children and leaves unrelated processes 
   }
 });
 
-test("shutdown allows cleanup and force-stops a child that ignores SIGTERM", async () => {
-  const launch = async (script) => {
-    const child = spawn(process.execPath, ["-e", script], {
-      detached: true,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    await new Promise((resolve, reject) => {
-      child.stdout.once("data", resolve);
-      child.once("error", reject);
-    });
-    return child;
-  };
-  const graceful = await launch(
-    "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80));setInterval(()=>{},1000);console.log('ready')",
-  );
-  await stopChildren([graceful], 1500);
-  assert.equal(graceful.exitCode, 0);
-  const stubborn = await launch(
-    "process.on('SIGTERM',()=>{});setInterval(()=>{},1000);console.log('ready')",
-  );
-  await stopChildren([stubborn], 100);
-  assert.equal(stubborn.signalCode, "SIGKILL");
-});
+test(
+  "POSIX shutdown allows cleanup and force-stops a child that ignores SIGTERM",
+  { skip: process.platform === "win32" },
+  async () => {
+    const launch = async (script) => {
+      const child = spawn(process.execPath, ["-e", script], {
+        detached: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      await new Promise((resolve, reject) => {
+        child.stdout.once("data", resolve);
+        child.once("error", reject);
+      });
+      return child;
+    };
+    const graceful = await launch(
+      "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80));setInterval(()=>{},1000);console.log('ready')",
+    );
+    await stopChildren([graceful], 1500);
+    assert.equal(graceful.exitCode, 0);
+    const stubborn = await launch(
+      "process.on('SIGTERM',()=>{});setInterval(()=>{},1000);console.log('ready')",
+    );
+    await stopChildren([stubborn], 100);
+    assert.equal(stubborn.signalCode, "SIGKILL");
+  },
+);
 
 import http from "node:http";
 import { checkLocalApi } from "./runtime.mjs";
@@ -218,8 +234,8 @@ test("desktop owns internal settings even when legacy values are present", () =>
       CODEXBOARD_CODEX_PROJECT_SNAPSHOT_FILE: "/legacy/snapshot.json",
       CODEXBOARD_TEMPORARY_PROJECT_ROOT: "/old/user/location",
     },
-    { CODEXBOARD_DATA_DIR: "/data" },
-    "/bundle",
+    { CODEXBOARD_DATA_DIR: resolve("/data") },
+    resolve("/bundle"),
   );
   assert.equal(env.CODEXBOARD_ENV, "production");
   assert.equal(env.CODEXBOARD_AUTH_MODE, "feishu");
@@ -227,7 +243,10 @@ test("desktop owns internal settings even when legacy values are present", () =>
   assert.equal(env.CODEXBOARD_PORT, "58978");
   assert.equal(env.CODEXBOARD_ADMIN_PORT, "58979");
   assert.equal(env.CODEXBOARD_ALLOWED_HOSTS, "tasks.example.test");
-  assert.equal(env.CODEXBOARD_CODEX_PROJECT_SNAPSHOT_FILE, "/data/run/codex-projects.json");
+  assert.equal(
+    env.CODEXBOARD_CODEX_PROJECT_SNAPSHOT_FILE,
+    resolve("/data/run/codex-projects.json"),
+  );
   assert.equal(env.CODEXBOARD_TEMPORARY_PROJECT_ROOT, undefined);
 });
 
@@ -276,10 +295,61 @@ test("HTTP deployment opens the Feishu app after checking its public origin", as
 test("Web native runtime does not require or forward a Feishu credentials file", () => {
   const env = nativeEnvironment(
     { CODEXBOARD_ORIGIN: "https://web.example.com", CODEXBOARD_AUTH_MODE: "web" },
-    { CODEXBOARD_DATA_DIR: "/data", CODEXBOARD_FEISHU_CREDENTIALS_FILE: "/secrets/feishu.json" },
-    "/runtime",
+    {
+      CODEXBOARD_DATA_DIR: resolve("/data"),
+      CODEXBOARD_FEISHU_CREDENTIALS_FILE: "/secrets/feishu.json",
+    },
+    resolve("/runtime"),
   );
   assert.equal(env.CODEXBOARD_AUTH_MODE, "web");
   assert.equal(env.CODEXBOARD_FEISHU_CREDENTIALS_FILE, undefined);
   assert.equal(env.CODEXBOARD_ENV, "production");
 });
+
+test("Windows runtime keeps executable suffixes, path delimiters and necessary OS variables", () => {
+  assert.equal(
+    runtimeBinary("C:\\Program Files\\CodexBoard\\runtime", "node", "win32"),
+    "C:\\Program Files\\CodexBoard\\runtime\\bin\\node.exe",
+  );
+  const env = runtimeEnvironment(
+    "C:\\runtime",
+    {
+      Path: "C:\\Git\\cmd;C:\\Windows\\System32",
+      SYSTEMROOT: "C:\\Windows",
+      USERPROFILE: "C:\\Users\\test",
+      TEMP: "C:\\Temp",
+      PRIVATE_SECRET: "do not forward",
+    },
+    "win32",
+  );
+  assert.equal(env.PATH, "C:\\runtime\\bin;C:\\Git\\cmd;C:\\Windows\\System32");
+  assert.equal(env.SystemRoot, "C:\\Windows");
+  assert.equal(env.USERPROFILE, "C:\\Users\\test");
+  assert.equal(env.PRIVATE_SECRET, undefined);
+});
+
+test(
+  "Windows shutdown drains IPC children and kills an unresponsive owned child",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const launch = async (script) => {
+      const child = spawn(process.execPath, ["-e", script], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore", "ipc"],
+      });
+      await new Promise((resolve, reject) => {
+        child.stdout.once("data", resolve);
+        child.once("error", reject);
+      });
+      return child;
+    };
+    const graceful = await launch(
+      "process.on('message',m=>{if(m.type==='codexboard.shutdown')setTimeout(()=>process.exit(0),50)});setInterval(()=>{},1000);console.log('ready')",
+    );
+    await stopChildren([graceful], 1500);
+    assert.equal(graceful.exitCode, 0);
+    const stubborn = await launch("setInterval(()=>{},1000);console.log('ready')");
+    await stopChildren([stubborn], 100);
+    assert.ok(stubborn.exitCode !== null || stubborn.signalCode !== null);
+  },
+);

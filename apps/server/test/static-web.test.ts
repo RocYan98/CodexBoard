@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { ensurePrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,7 +29,7 @@ describe("production web hosting", () => {
     writeFileSync(join(webRoot, "package.json"), '{"privateMarker":"inside-web-root"}');
     const codexTokenFile = join(webRoot, "codex-ws-token");
     writeFileSync(codexTokenFile, "test-token\n");
-    chmodSync(codexTokenFile, 0o600);
+    ensurePrivateFileSync(codexTokenFile);
     const config = loadConfig({
       CODEXBOARD_ENV: "production",
       CODEXBOARD_AUTH_MODE: "feishu",

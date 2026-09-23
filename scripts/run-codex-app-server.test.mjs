@@ -1,21 +1,16 @@
 import assert from "node:assert/strict";
-import {
-  chmodSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import test from "node:test";
 
 import * as codexBridge from "./run-codex-app-server.mjs";
+import { assertPrivateFileSync, ensurePrivateFileSync } from "./private-file-permissions.mjs";
+import { makePublicReadableSync } from "./test-support/private-access.mjs";
 
 const { buildCodexArguments, validateCodexBridgeOptions } = codexBridge;
+const PROJECT_ROOT = join(tmpdir(), "codexboard-runner-fixture-projects");
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "codexboard-codex-bridge-"));
@@ -25,6 +20,7 @@ function fixture() {
   const projectSnapshotFile = join(directory, "run", "codex-projects.json");
   writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   writeFileSync(tokenFile, "capability-token\n", { mode: 0o600 });
+  ensurePrivateFileSync(tokenFile);
   writeFileSync(projectStateFile, "{}\n", { mode: 0o600 });
   return { directory, codexPath, tokenFile, projectStateFile, projectSnapshotFile };
 }
@@ -59,7 +55,7 @@ test("rejects non-loopback endpoints and unsafe token files", () => {
         }),
       /ws:\/\/127\.0\.0\.1/,
     );
-    chmodSync(value.tokenFile, 0o644);
+    makePublicReadableSync(value.tokenFile);
     assert.throws(
       () =>
         validateCodexBridgeOptions({
@@ -69,9 +65,9 @@ test("rejects non-loopback endpoints and unsafe token files", () => {
           projectStateFile: value.projectStateFile,
           projectSnapshotFile: value.projectSnapshotFile,
         }),
-      /0600/,
+      /0600|ACL|符号链接/,
     );
-    chmodSync(value.tokenFile, 0o600);
+    ensurePrivateFileSync(value.tokenFile);
     const symlink = join(value.directory, "token-link");
     symlinkSync(value.tokenFile, symlink);
     assert.throws(
@@ -83,7 +79,7 @@ test("rejects non-loopback endpoints and unsafe token files", () => {
           projectStateFile: value.projectStateFile,
           projectSnapshotFile: value.projectSnapshotFile,
         }),
-      /0600/,
+      /0600|ACL|符号链接/,
     );
   } finally {
     rmSync(value.directory, { recursive: true, force: true });
@@ -162,22 +158,22 @@ test("reads only Codex Desktop projects present in project-order", () => {
           "11111111-1111-4111-8111-111111111111": {
             id: "11111111-1111-4111-8111-111111111111",
             name: "论文",
-            rootPaths: ["/Users/test/Projects/codex-paper"],
+            rootPaths: [join(PROJECT_ROOT, "Projects", "codex-paper")],
           },
           "22222222-2222-4222-8222-222222222222": {
             id: "22222222-2222-4222-8222-222222222222",
             name: "Docker",
-            rootPaths: ["/Users/test/Docker", "/Users/test/Docker/tools"],
+            rootPaths: [join(PROJECT_ROOT, "Docker"), join(PROJECT_ROOT, "Docker", "tools")],
           },
           "g-p-internal": {
             id: "g-p-internal",
             name: "临时",
-            rootPaths: ["/Users/test/.codex/.chatgpt-projects/g-p-internal"],
+            rootPaths: [join(PROJECT_ROOT, ".codex", ".chatgpt-projects", "g-p-internal")],
           },
           "33333333-3333-4333-8333-333333333333": {
             id: "33333333-3333-4333-8333-333333333333",
             name: "残留项目",
-            rootPaths: ["/private/tmp/stale"],
+            rootPaths: [join(PROJECT_ROOT, "stale")],
           },
         },
         "project-order": [
@@ -194,13 +190,13 @@ test("reads only Codex Desktop projects present in project-order", () => {
       {
         codexProjectId: "22222222-2222-4222-8222-222222222222",
         name: "Docker",
-        rootPaths: ["/Users/test/Docker", "/Users/test/Docker/tools"],
+        rootPaths: [join(PROJECT_ROOT, "Docker"), join(PROJECT_ROOT, "Docker", "tools")],
         position: 0,
       },
       {
         codexProjectId: "11111111-1111-4111-8111-111111111111",
         name: "论文",
-        rootPaths: ["/Users/test/Projects/codex-paper"],
+        rootPaths: [join(PROJECT_ROOT, "Projects", "codex-paper")],
         position: 1,
       },
     ]);
@@ -219,7 +215,7 @@ test("atomically writes a private minimal project snapshot", () => {
         {
           codexProjectId: "11111111-1111-4111-8111-111111111111",
           name: "论文",
-          rootPaths: ["/Users/test/Projects/codex-paper"],
+          rootPaths: [join(PROJECT_ROOT, "Projects", "codex-paper")],
           position: 0,
         },
       ],
@@ -230,7 +226,9 @@ test("atomically writes a private minimal project snapshot", () => {
         : false;
     assert.equal(written, true);
     assert.deepEqual(JSON.parse(readFileSync(value.projectSnapshotFile, "utf8")), snapshot);
-    assert.equal(statSync(value.projectSnapshotFile).mode & 0o777, 0o600);
+    assertPrivateFileSync(value.projectSnapshotFile);
+    if (process.platform !== "win32")
+      assert.equal(statSync(value.projectSnapshotFile).mode & 0o777, 0o600);
   } finally {
     rmSync(value.directory, { recursive: true, force: true });
   }

@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -37,7 +38,9 @@ afterEach(() => {
 });
 
 function temporaryDirectory(): string {
-  const directory = mkdtempSync(join("/private/tmp", "codexboard-backup-"));
+  const directory = mkdtempSync(
+    join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "codexboard-backup-"),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -554,22 +557,25 @@ describe("BackupService", () => {
     }
   });
 
-  it("canonicalizes the macOS tmp alias before enforcing attachment containment", async () => {
-    const dataDirectory = temporaryDirectory();
-    const database = initializeDatabase(join(dataDirectory, "taskboard.sqlite"));
-    const service = new BackupService({ database, dataDirectory });
-    const aliasDestination = join(
-      "/tmp",
-      dataDirectory.slice("/private/tmp/".length),
-      "attachments",
-      "alias-backup",
-    );
-    try {
-      await expect(service.create(aliasDestination)).rejects.toThrow(/附件目录/);
-    } finally {
-      database.close();
-    }
-  });
+  it.runIf(process.platform === "darwin")(
+    "canonicalizes the macOS tmp alias before enforcing attachment containment",
+    async () => {
+      const dataDirectory = temporaryDirectory();
+      const database = initializeDatabase(join(dataDirectory, "taskboard.sqlite"));
+      const service = new BackupService({ database, dataDirectory });
+      const aliasDestination = join(
+        "/tmp",
+        dataDirectory.slice("/private/tmp/".length),
+        "attachments",
+        "alias-backup",
+      );
+      try {
+        await expect(service.create(aliasDestination)).rejects.toThrow(/附件目录/);
+      } finally {
+        database.close();
+      }
+    },
+  );
 
   it("always removes the private inspection copy when SQLite validation fails", async () => {
     const dataDirectory = temporaryDirectory();

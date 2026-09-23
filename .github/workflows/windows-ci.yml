@@ -1,4 +1,4 @@
-name: Windows compatibility baseline
+name: Windows build and validation
 
 on:
   push:
@@ -78,7 +78,7 @@ jobs:
   tests:
     name: Windows x64 / ${{ matrix.suite }} tests
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -106,7 +106,7 @@ jobs:
         if: matrix.suite == 'desktop-scripts'
         run: npx --no-install playwright install chromium webkit
       - name: Run complete suite
-        timeout-minutes: 8
+        timeout-minutes: 20
         run: node scripts/run-ci-tests.mjs ${{ matrix.suite }}
       - name: Upload test evidence
         if: ${{ !cancelled() }}
@@ -153,16 +153,46 @@ jobs:
           if-no-files-found: warn
           path: test-results/windows/desktop-check/
 
+  installer:
+    name: Windows x64 / Test installer
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Preserve repository bytes on checkout
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.2
+          cache: npm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build Windows test installer with verified runtime assets
+        run: node apps/desktop/scripts/build-windows.mjs
+      - name: Upload test installer and checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x64-test-installer-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: apps/desktop/dist/windows-x64/
+
   summary:
     name: Windows baseline summary
     if: ${{ always() }}
-    needs: [build, tests, desktop-check]
+    needs: [build, tests, desktop-check, installer]
     runs-on: windows-2022
     timeout-minutes: 5
     env:
       BUILD_RESULT: ${{ needs.build.result }}
       TEST_RESULT: ${{ needs.tests.result }}
       DESKTOP_RESULT: ${{ needs.desktop-check.result }}
+      INSTALLER_RESULT: ${{ needs.installer.result }}
     steps:
       - name: Summarize without suppressing failures
         run: |
@@ -174,11 +204,12 @@ jobs:
           | Node and web build, typecheck, lint | $env:BUILD_RESULT |
           | All six test suites | $env:TEST_RESULT |
           | Desktop Rust compilation | $env:DESKTOP_RESULT |
+          | Windows test installer | $env:INSTALLER_RESULT |
 
           Download per-suite logs, JUnit reports and compiled assets from this run's artifacts.
-          This workflow does not produce a Windows installer or validate a logged-in Codex desktop session.
+          The installer is an unsigned test artifact, not a Release. A logged-in Codex desktop session is validated separately.
           A failed check is an unresolved compatibility issue or infrastructure error; inspect its log.
           "@ | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          if (@($env:BUILD_RESULT, $env:TEST_RESULT, $env:DESKTOP_RESULT) | Where-Object { $_ -ne 'success' }) {
+          if (@($env:BUILD_RESULT, $env:TEST_RESULT, $env:DESKTOP_RESULT, $env:INSTALLER_RESULT) | Where-Object { $_ -ne 'success' }) {
             exit 1
           }

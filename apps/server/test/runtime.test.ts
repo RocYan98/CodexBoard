@@ -1,3 +1,7 @@
+import {
+  assertPrivateDirectorySync,
+  assertPrivateFileSync,
+} from "../../../scripts/private-file-permissions.mjs";
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,8 +42,12 @@ describe("runtime descriptor", () => {
       () => new Date("2026-08-30T12:00:00.000Z"),
     );
 
-    expect(statSync(join(dataDirectory, "run")).mode & 0o777).toBe(0o700);
-    expect(statSync(handle.path).mode & 0o777).toBe(0o600);
+    assertPrivateDirectorySync(join(dataDirectory, "run"));
+    assertPrivateFileSync(handle.path);
+    if (process.platform !== "win32") {
+      expect(statSync(join(dataDirectory, "run")).mode & 0o777).toBe(0o700);
+      expect(statSync(handle.path).mode & 0o777).toBe(0o600);
+    }
     expect(RuntimeDescriptorSchema.parse(handle.descriptor)).toMatchObject({
       generatedAt: "2026-08-30T12:00:00.000Z",
       capabilityToken: capability,
@@ -55,7 +63,11 @@ describe("runtime descriptor", () => {
     const dataDirectory = temporaryDirectory();
     const target = temporaryDirectory();
     mkdirSync(join(dataDirectory), { recursive: true });
-    symlinkSync(target, join(dataDirectory, "run"));
+    symlinkSync(
+      target,
+      join(dataDirectory, "run"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
     const config = loadConfig({
       CODEXBOARD_ENV: "test",
       CODEXBOARD_DATA_DIR: dataDirectory,

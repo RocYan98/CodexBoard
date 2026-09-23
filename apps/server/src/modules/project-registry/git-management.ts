@@ -46,7 +46,7 @@ export class GitManagement {
     private readonly runner?: WorkspaceCommandRunner,
     originReader?: GitOriginReader,
   ) {
-    this.#roots = roots.map((root) => realpathSync(root));
+    this.#roots = roots.map((root) => realpathSync.native(root));
     this.#origins = new GitOrigins(database, originReader);
   }
   async #run(cwd: string, command: readonly string[]) {
@@ -73,7 +73,7 @@ export class GitManagement {
     return this.#run(cwd, ["git", "-C", cwd, ...args]);
   }
   #allowed(path: string) {
-    const canonical = realpathSync(path);
+    const canonical = realpathSync.native(path);
     if (!this.#roots.some((root) => inside(root, canonical)))
       throw new AppError("FORBIDDEN", 403, "目录超出允许的工作区");
     return canonical;
@@ -81,7 +81,7 @@ export class GitManagement {
   async #repository(projectId: string) {
     const context = await this.registry.resolveExecutionContext(projectId);
     const cwd = this.#allowed(context.cwd);
-    if ((await this.#git(cwd, "rev-parse", "--show-toplevel")).trim() !== cwd)
+    if (realpathSync.native((await this.#git(cwd, "rev-parse", "--show-toplevel")).trim()) !== cwd)
       throw conflict("项目目录必须是 Git 工作树根目录");
     const common = this.#allowed(
       resolve(cwd, (await this.#git(cwd, "rev-parse", "--git-common-dir")).trim()),
@@ -101,7 +101,7 @@ export class GitManagement {
         const value = (key: string) =>
           fields.find((field) => field.startsWith(`${key} `))?.slice(key.length + 1);
         return {
-          path: value("worktree")!,
+          path: resolve(value("worktree")!),
           branch: value("branch")?.replace(/^refs\/heads\//, "") ?? null,
           headSha: value("HEAD") ?? "",
           locked: fields.some((field) => field === "locked" || field.startsWith("locked ")),
@@ -164,7 +164,7 @@ export class GitManagement {
       if (resource.path) {
         try {
           const path = this.#allowed(resource.path);
-          if (path !== resource.path) throw conflict("工作树路径包含符号链接");
+          if (relative(path, resource.path) !== "") throw conflict("工作树路径包含符号链接");
           dirty = Boolean(
             (await this.#git(path, "status", "--porcelain", "--untracked-files=all")).trim(),
           );

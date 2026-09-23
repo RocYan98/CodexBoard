@@ -2,11 +2,15 @@ import { manageWebAccounts } from "./web-accounts.mjs";
 import { readFrpcOrigin, isSupportedOrigin, readFrpcDnsTarget } from "./frpc-config.mjs";
 import { DEFAULT_PORTS, readLocalPorts, savePorts } from "./ports.mjs";
 import { createSetupController, detectCodexPath } from "./setup-controller.mjs";
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+  assertPrivateFileSync,
+} from "#private-file-permissions";
 import { createHash, randomUUID } from "node:crypto";
 import {
   readFileSync,
   existsSync,
-  mkdirSync,
   writeFileSync,
   realpathSync,
   lstatSync,
@@ -15,14 +19,62 @@ import {
   rmSync,
   chmodSync,
 } from "node:fs";
-import { join, resolve, isAbsolute, dirname } from "node:path";
-import { homedir } from "node:os";
+import { join, resolve, isAbsolute, dirname, win32 } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import net from "node:net";
 import https from "node:https";
 import http from "node:http";
+
+export function runtimeBinary(root, name, platform = process.platform) {
+  return (platform === "win32" ? win32 : { join }).join(
+    root,
+    "bin",
+    `${name}${platform === "win32" ? ".exe" : ""}`,
+  );
+}
+export function runtimeEnvironment(root, env = process.env, platform = process.platform) {
+  if (platform !== "win32")
+    return {
+      HOME: homedir(),
+      TMPDIR: env.TMPDIR || tmpdir(),
+      PATH: `${join(root, "bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
+      LANG: "zh_CN.UTF-8",
+    };
+  const values = {};
+  for (const key of [
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "TEMP",
+    "TMP",
+    "HOME",
+  ]) {
+    const source = Object.keys(env).find(
+      (candidate) => candidate.toLowerCase() === key.toLowerCase(),
+    );
+    if (source && env[source]) values[key] = env[source];
+  }
+  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === "path");
+  values.PATH = `${win32.join(root, "bin")};${key ? env[key] : win32.join(values.SystemRoot || "C:\\Windows", "System32")}`;
+  return values;
+}
+function writePrivateNew(file, contents) {
+  writeFileSync(file, "", { flag: "wx", mode: 0o600 });
+  try {
+    ensurePrivateFileSync(file);
+    writeFileSync(file, contents);
+  } catch (error) {
+    rmSync(file, { force: true });
+    throw error;
+  }
+}
 
 export function renderCaddyfile(url, ports) {
   if (
@@ -83,7 +135,7 @@ export function nativeEnvironment(prod, desktop, root, ports = DEFAULT_PORTS) {
     CODEXBOARD_CODEX_PROJECT_STATE_FILE: join(homedir(), ".codex/.codex-global-state.json"),
     CODEXBOARD_WORKSPACE_ROOTS:
       desktop.CODEXBOARD_WORKSPACE_ROOTS || desktop.CODEXBOARD_WORKSPACE_ROOT,
-    CODEXBOARD_EXECUTOR_NODE_PATH: join(root, "bin/node"),
+    CODEXBOARD_EXECUTOR_NODE_PATH: runtimeBinary(root, "node"),
     CODEXBOARD_EXECUTOR_TASKCTL_PATH: join(root, "packages/taskctl/dist/cli.js"),
     CODEXBOARD_EXECUTOR_DATA_DIR: data,
   };
@@ -99,6 +151,18 @@ export async function assertPortsFree(ports) {
 export async function stopChildren(children, graceMs = 12000) {
   const signal = (child, sig) => {
     if (child.exitCode !== null || child.signalCode) return;
+    if (process.platform === "win32") {
+      if (sig === "SIGTERM" && child.connected) {
+        child.send({ type: "codexboard.shutdown" }, () => {});
+      } else {
+        const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        killer.on("error", () => child.kill());
+      }
+      return;
+    }
     try {
       process.kill(-child.pid, sig);
     } catch {
@@ -154,7 +218,12 @@ function checkPublicBoard(origin) {
 }
 function openNativeApp(bundle, url) {
   return new Promise((resolve, reject) => {
-    const child = spawn("/usr/bin/open", ["-b", bundle, url], { stdio: "ignore" });
+    const windows = process.platform === "win32";
+    const child = spawn(
+      windows ? "rundll32.exe" : "/usr/bin/open",
+      windows ? ["url.dll,FileProtocolHandler", url] : bundle ? ["-b", bundle, url] : [url],
+      { stdio: "ignore", windowsHide: true },
+    );
     child.once("error", reject);
     child.once("exit", (code) => (code === 0 ? resolve() : reject(new Error("open failed"))));
   });
@@ -185,7 +254,9 @@ export async function openFeishuBoard(input, dependencies = {}) {
 }
 
 export function desktopPaths(
-  directory = join(homedir(), "Library/Application Support/CodexBoard/deploy"),
+  directory = process.platform === "win32"
+    ? join(process.env.LOCALAPPDATA || join(homedir(), "AppData/Local"), "CodexBoard/deploy")
+    : join(homedir(), "Library/Application Support/CodexBoard/deploy"),
 ) {
   const base = dirname(directory);
   return {
@@ -207,7 +278,7 @@ export function initializeDeployment(directory, defaults = DEFAULT_PORTS) {
     paths.CODEXBOARD_CADDY_DATA_DIR,
     paths.CODEXBOARD_CADDY_CONFIG_DIR,
   ])
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    ensurePrivateDirectorySync(dir);
   for (const [file, content] of [
     [paths.CODEXBOARD_FRPC_CONFIG_FILE, ""],
     [paths.CODEXBOARD_CODEX_TOKEN_FILE, randomUUID() + randomUUID() + "\n"],
@@ -223,7 +294,7 @@ export function initializeDeployment(directory, defaults = DEFAULT_PORTS) {
     ],
   ]) {
     try {
-      writeFileSync(file, content, { flag: "wx", mode: 0o600 });
+      writePrivateNew(file, content);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
@@ -254,7 +325,7 @@ export function initializeDeployment(directory, defaults = DEFAULT_PORTS) {
     validateCredentials(legacy);
     const temp = join(dirname(credentialsFile), `.codexboard-config-${randomUUID()}.json`);
     try {
-      writeFileSync(temp, JSON.stringify(legacy, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+      writePrivateNew(temp, JSON.stringify(legacy, null, 2) + "\n");
       renameSync(temp, credentialsFile);
     } finally {
       rmSync(temp, { force: true });
@@ -288,7 +359,11 @@ function validateCredentials(value) {
 }
 function readCredentials(path) {
   assertRegularFile(path);
-  if ((statSync(path).mode & 0o077) !== 0) throw new Error("飞书凭据文件权限必须为 0600");
+  try {
+    assertPrivateFileSync(path);
+  } catch {
+    throw new Error("飞书凭据文件必须具有当前用户私有权限（POSIX 0600 / Windows ACL）");
+  }
   try {
     return validateCredentials(JSON.parse(readFileSync(path, "utf8")));
   } catch {
@@ -383,7 +458,7 @@ export async function saveDeploymentConfiguration(directory, values, verifyFrpc)
       const temp = join(dirname(change.path), `.codexboard-config-${randomUUID()}.toml`);
       const previous = existsSync(change.path) ? readFileSync(change.path) : null;
       const mode = previous === null ? 0o600 : statSync(change.path).mode & 0o777;
-      writeFileSync(temp, change.content, { mode: 0o600, flag: "wx" });
+      writePrivateNew(temp, change.content);
       staged.push({ ...change, temp, previous, mode });
     }
     if (frpc) {
@@ -402,7 +477,8 @@ export async function saveDeploymentConfiguration(directory, values, verifyFrpc)
       if (item.previous === null) rmSync(item.path, { force: true });
       else {
         writeFileSync(item.path, item.previous);
-        chmodSync(item.path, item.mode);
+        if (process.platform === "win32") ensurePrivateFileSync(item.path);
+        else chmodSync(item.path, item.mode);
       }
     }
     throw error;
@@ -450,7 +526,7 @@ function configurationFingerprint(deployment, ports, codexPath) {
 async function main() {
   const root = resolve(process.argv[2]);
   const stateDir = resolve(process.argv[3]);
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(stateDir);
   const defaults = {
     configDirectory: join(stateDir, "deploy"),
     codexPath: detectCodexPath(),
@@ -547,7 +623,7 @@ async function main() {
       frpc: state.deployment.frpc || "",
       caddyPort: state.ports.caddy,
       codexPath: settings.codexPath,
-      frpcBinary: join(root, "bin/frpc"),
+      frpcBinary: runtimeBinary(root, "frpc"),
       servicesRunning: children.length === 3,
       restartRequired: state.restartRequired,
     }),
@@ -626,12 +702,13 @@ async function main() {
     state.services = state.services.map((s) => ({ ...s, status: "stopped" }));
     publish();
   }
-  function launch(name, command, args, env) {
+  function launch(name, command, args, env, ipc = false) {
     const child = spawn(command, args, {
       cwd: root,
       env,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+      windowsHide: true,
+      stdio: ipc ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"],
     });
     children.push(child);
     state.services.push({ name, status: "starting" });
@@ -672,20 +749,23 @@ async function main() {
       const { c, env, url, ports, codex } = config;
       env.CODEXBOARD_CODEX_COMMAND = codex;
       await assertPortsFree([ports.api, ports.admin, ports.bridge, ports.caddy]);
-      mkdirSync(join(c.CODEXBOARD_DATA_DIR, "run"), { recursive: true, mode: 0o700 });
+      ensurePrivateDirectorySync(join(c.CODEXBOARD_DATA_DIR, "run"));
       const caddyPath = join(stateDir, "Caddyfile");
       writeFileSync(caddyPath, renderCaddyfile(url, ports), { mode: 0o600 });
       const common = {
-        HOME: homedir(),
-        TMPDIR: process.env.TMPDIR || "/tmp",
-        PATH: `${join(root, "bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
-        LANG: "zh_CN.UTF-8",
+        ...runtimeEnvironment(root),
         ...env,
         XDG_DATA_HOME: c.CODEXBOARD_CADDY_DATA_DIR,
         XDG_CONFIG_HOME: c.CODEXBOARD_CADDY_CONFIG_DIR,
       };
-      const node = join(root, "bin/node");
-      launch("CodexBoard 后端", node, ["apps/server/dist/main.js"], common);
+      const node = runtimeBinary(root, "node");
+      launch(
+        "CodexBoard 后端",
+        node,
+        ["apps/server/dist/main.js"],
+        common,
+        process.platform === "win32",
+      );
       // Do not let Caddy establish a keep-alive connection to another process
       // sharing the wildcard port while our loopback backend is still starting.
       const backendDeadline = Date.now() + 15000;
@@ -696,11 +776,16 @@ async function main() {
       }
       launch(
         "Caddy",
-        join(root, "bin/caddy"),
+        runtimeBinary(root, "caddy"),
         ["run", "--config", caddyPath, "--adapter", "caddyfile"],
         common,
       );
-      launch("公网隧道", join(root, "bin/frpc"), ["-c", c.CODEXBOARD_FRPC_CONFIG_FILE], common);
+      launch(
+        "公网隧道",
+        runtimeBinary(root, "frpc"),
+        ["-c", c.CODEXBOARD_FRPC_CONFIG_FILE],
+        common,
+      );
       state.url = url.origin;
       state.message = "服务启动中，等待健康检查…";
       publish();
@@ -793,13 +878,7 @@ async function main() {
           try {
             if (state.phase !== "ready" || config?.url.protocol !== "https:")
               throw new Error("请先启动服务并配置 HTTPS 公网地址。");
-            await new Promise((resolve, reject) => {
-              const child = spawn("/usr/bin/open", [config.url.origin], { stdio: "ignore" });
-              child.once("error", reject);
-              child.once("exit", (code) =>
-                code === 0 ? resolve() : reject(new Error("无法打开默认浏览器。")),
-              );
-            });
+            await openNativeApp(null, config.url.origin);
             state.webAccountsMessage = "已在默认浏览器打开登录页面。";
           } catch {
             state.webAccountsMessage =
@@ -839,7 +918,7 @@ async function main() {
             state.deployment = await saveDeploymentConfiguration(
               settings.configDirectory,
               request.settings || {},
-              (file) => verifyFrpcFile(join(root, "bin/frpc"), file),
+              (file) => verifyFrpcFile(runtimeBinary(root, "frpc"), file),
             );
             state.deploymentRevision += 1;
             const changed = state.deployment.changed;
@@ -869,7 +948,7 @@ async function main() {
               paths.CODEXBOARD_PORTS_FILE,
               paths.CODEXBOARD_FRPC_CONFIG_FILE,
               request.settings || {},
-              (file) => verifyFrpcFile(join(root, "bin/frpc"), file),
+              (file) => verifyFrpcFile(runtimeBinary(root, "frpc"), file),
             );
             state.ports = savedPorts.ports;
             state.portsRevision += 1;

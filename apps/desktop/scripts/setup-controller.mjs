@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { runSetupChecks } from "./setup-checks.mjs";
 import { readFrpcOrigin, readFrpcDnsTarget } from "./frpc-config.mjs";
+import { findWindowsCodexPackage, windowsOpenArguments } from "#codex-windows-app";
 
 const appPaths = () => [
   "/Applications/Codex.app",
@@ -14,7 +15,11 @@ const appPaths = () => [
   join(homedir(), "Applications/ChatGPT.app"),
 ];
 
-export function detectCodexPath(exists = existsSync) {
+export function detectCodexPath(
+  exists = existsSync,
+  { platform = process.platform, findWindowsPackage = findWindowsCodexPackage } = {},
+) {
+  if (platform === "win32") return findWindowsPackage({ exists })?.cliPath || "codex.exe";
   const candidates = [
     ...appPaths().map((path) => join(path, "Contents/Resources/codex")),
     "/opt/homebrew/bin/codex",
@@ -31,20 +36,33 @@ const targets = {
 
 export async function openSetupTarget(
   target,
-  { execute = promisify(execFile), exists = existsSync } = {},
+  {
+    execute = promisify(execFile),
+    exists = existsSync,
+    platform = process.platform,
+    findWindowsPackage = findWindowsCodexPackage,
+  } = {},
 ) {
-  let args, label;
+  let args,
+    label,
+    command = "/usr/bin/open";
   if (target === "codex-app") {
-    const app = appPaths().find(exists);
+    const app = platform === "win32" ? findWindowsPackage({ exists }) : appPaths().find(exists);
     if (!app) throw new Error("未找到 Codex 应用，请先下载并安装，再打开应用完成登录。");
-    args = ["-a", app];
+    if (platform === "win32") {
+      command = "explorer.exe";
+      args = [`shell:AppsFolder\\${app.appUserModelId}`];
+    } else args = ["-a", app];
     label = "Codex";
   } else if (Object.hasOwn(targets, target)) {
     [label] = targets[target];
-    args = [targets[target][1]];
+    if (platform === "win32") {
+      command = "powershell.exe";
+      args = windowsOpenArguments(targets[target][1]);
+    } else args = [targets[target][1]];
   } else throw new Error("不支持打开此引导入口。");
   try {
-    await execute("/usr/bin/open", args, { timeout: 5000, maxBuffer: 8192 });
+    await execute(command, args, { timeout: 5000, maxBuffer: 8192, windowsHide: true });
   } catch {
     throw new Error("无法打开引导入口，请检查浏览器或 Codex 是否已安装。");
   }

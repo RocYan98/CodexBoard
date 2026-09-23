@@ -1,6 +1,6 @@
 import { remoteTurnItems } from "@codexboard/contracts";
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -53,13 +53,27 @@ export async function readRemoteImage(snapshot, { itemId, imageIndex }) {
   if (!source) throw new Error("图片不在此对话中");
   let bytes;
   if (typeof source.path === "string" && isAbsolute(source.path)) {
+    // O_NOFOLLOW is unavailable on Windows. Check the entry and the opened
+    // handle before reading, so a symlink or a replaced path cannot be used.
+    const entry = await lstat(source.path);
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error("图片暂不支持预览");
     const file = await open(
       source.path,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     try {
       const stat = await file.stat();
-      if (!stat.isFile() || stat.size === 0 || stat.size > MAX_BYTES)
+      const checked = await lstat(source.path);
+      if (
+        !stat.isFile() ||
+        stat.size === 0 ||
+        stat.size > MAX_BYTES ||
+        stat.ino !== entry.ino ||
+        stat.dev !== entry.dev ||
+        checked.isSymbolicLink() ||
+        checked.ino !== stat.ino ||
+        checked.dev !== stat.dev
+      )
         throw new Error("图片暂不支持预览");
       bytes = Buffer.alloc(stat.size);
       let offset = 0;
