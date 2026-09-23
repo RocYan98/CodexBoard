@@ -275,3 +275,47 @@ Mac 文件位于 `~/Downloads/CodexBoard-Windows-Test-492b4db/`；无影文件�
 无影以含 `import` 的独立 ESM 临时文件复现相同的大写扩展名失败。先用 `realpathSync.native` 恢复实际文件名大小写，再带上述 Node 参数启动，返回 `ESM_OK`、退出码 0。Rust 原有临时脚本只有 CommonJS 兼容语句，不能暴露此问题；回归现已加入 `type: module`、显式 `import/export`，保留大写命名路径用例。PowerShell 路径拼接和文件检查改用 .NET 文件系统 API；无影也确认反斜杠命名路径的 `File.Exists` 和 `Process.Start` 可成功运行捆绑 Node，退出码 0。
 
 这些定位结果仍需新一轮完整 Windows CI 和新安装包无参数覆盖启动验证。
+
+### 修复后的完整测试结果
+
+提交 `6f256a8221cda7fd869ad86a3d19229bbbc247c2` 的 [Actions 运行 35810830531](https://github.com/RocYan98/CodexBoard/actions/runs/35810830531) 中，六组 `result.json` 均确认 `win32` / `x64` / Node `v22.23.2`、`status: passed`、`exitCode: 0`、`signal: null`。按 JUnit testcase 独立核对如下：
+
+| 测试组          | 总数 | 通过 | 失败 | 跳过 |
+| --------------- | ---: | ---: | ---: | ---: |
+| contracts       |   51 |   51 |    0 |    0 |
+| taskctl         |  103 |  103 |    0 |    0 |
+| server          |  613 |  611 |    0 |    2 |
+| web             |  204 |  204 |    0 |    0 |
+| scripts         |  130 |  130 |    0 |    0 |
+| desktop-scripts |  241 |  229 |    0 |   12 |
+| 合计            | 1342 | 1328 |    0 |   14 |
+
+14 项跳过均为其他平台专属用例：macOS `.app` launcher 2 项、macOS `taskctl.sh` 8 项、POSIX umask 1 项、POSIX SIGTERM 1 项、macOS `/tmp` 别名 1 项、macOS HOME/Documents 默认路径 1 项。Windows 命名空间、大写别名、真实 ESM 入口、PowerShell 包装器和独立 ACL 用例均实际运行并通过。Node/Web 构建、类型检查、lint、Rust 全目标编译及 Rust 启动真实 ESM 脚本也通过。
+
+无影另行下载同一提交的 `taskctl.ps1`，SHA-256 为 `e85b4aac54d3b9bab2c455fc7d7b71cf842bf8aa505c13e3131306e556af8a01`。在子 PowerShell 中指定大写命名空间形式的既有测试安装目录，执行 `--help` 返回正常帮助及退出码 0；原进程环境随后恢复。输出为同一 Downloads 测试目录的 `wrapper-6f256a8-help.txt`。该检查只运行帮助，不读取用户会话或业务数据。
+
+上述 Actions 最终整体成功，安装作业生成 artifact `10729823381`（`windows-x64-test-installer-6f256a8221cda7fd869ad86a3d19229bbbc247c2`）。`CodexBoard Windows Test_0.1.10_x64-setup.exe` 为 `54568595` 字节，Mac 和无影均通过随包校验，双方 SHA-256 一致：
+
+```text
+96ae313a8fe21335ba685a8fd38b4d9eeed25eefb7f6de654d256d3ea2f159a2
+```
+
+Mac 安装包位于 `~/Downloads/CodexBoard-Windows-Test-6f256a8/`，无影位于上述 Downloads 测试目录的 `installer-6f256a8/`。构建信息仍为 `win32` / `x64`、版本 `0.1.10`、`signed: false`、`release: false`，未发布正式 Release。
+
+### 新安装包在无影中的正常启动验收
+
+在同一 Windows Server 2022 Datacenter x64、管理员账号下，NSIS 选择“添加/重新安装”，保留 `C:\Users\admin\AppData\Local\CodexBoard Windows Test\` 目录，完成新包覆盖安装。此次使用安装向导的正常启动入口，随后也直接启动 `codexboard-desktop.exe`；没有设置 `NODE_OPTIONS` 或复用此前诊断启动对象。当前 PowerShell 的 `NODE_OPTIONS` 为空。
+
+| 检查           | 实测结果                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 安装资源       | `runtime/desktop/runtime.mjs` 和 `runtime/scripts/node-script-arguments.mjs` 的 SHA-256 均与 `6f256a8` 源码一致，已替换此前临时诊断脚本。  |
+| 首次启动       | 正常显示“让 Codex 使用 CodexBoard”提示，选择“稍后”后进入使用引导。                                                                         |
+| 服务管理器     | 主程序及安装目录下的 Node 进程保持运行；服务概览显示预期的缺少连接配置提示，不再显示“服务管理器已退出”。                                   |
+| Codex 探测     | 应用设置显示已安装 `OpenAI.Codex_26.917.686.0_x64__2p2nqsd0c76g0` 内的 `app\resources\codex.exe`。                                         |
+| Skill 原生入口 | 应用设置 → Agent Skill 可读取并重新检查状态，显示“尚未安装”及随包版本 `0.1.10`，没有管理工具不可用错误。未安装 Skill 或进行 CLI 身份授权。 |
+| 内置 CLI       | 同版本 PowerShell 包装器自动发现更新后的应用，`--help` 正常输出，退出码 0；输出为 `installed-6f256a8-help.txt`。                           |
+| 关闭与恢复     | 关闭窗口后后台仍运行；通过托盘“显示主窗口”恢复成功。                                                                                       |
+| 正常退出       | 通过托盘“退出 CodexBoard”后，限定安装目录的应用和 Node 进程计数为 0。                                                                      |
+| 再次启动       | 不带参数覆盖重新启动成功，服务概览仍为预期的未配置状态；主窗口保留在无影浏览器面板。                                                       |
+
+本次确认测试安装包的安装、正常启动、原生 Skill 状态查询、CLI 帮助、托盘行为与退出后重启通过。尚未配置或保存公网隧道、飞书凭据、Web 账号，后台业务服务及公网入口未启动；真实 Web/飞书登录、CLI 用户配对和业务任务执行均未验证。既有官方 Codex 会话未退出、未接管、未触发真实任务。Windows 11、标准用户之间的隔离及正式签名/发布升级也未验证，不能据本轮桌面启动验收宣称全部功能已可用。
