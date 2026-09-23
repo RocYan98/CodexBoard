@@ -92,10 +92,10 @@ The installer can download WebView2. Install and sign in to Codex Desktop separa
 3. Open the DMG and drag `CodexBoard.app` into **Applications**.
 4. Open CodexBoard from Applications, then eject the installer disk.
 
-To check download integrity, also download the corresponding `.dmg.sha256` file and run the following in the directory containing both files. For version 0.1.11:
+To check download integrity, also download the corresponding `.dmg.sha256` file and run the following in the directory containing both files. For version 1.0.0:
 
 ```sh
-shasum -a 256 -c CodexBoard-0.1.11-macos-arm64.dmg.sha256
+shasum -a 256 -c CodexBoard-1.0.0-macos-arm64.dmg.sha256
 ```
 
 An `OK` result means the file matches the publisher's checksum.

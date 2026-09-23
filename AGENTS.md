@@ -49,7 +49,7 @@ sw_vers -productVersion
 
    ```sh
    cd "$HOME/Downloads"
-   shasum -a 256 -c "CodexBoard-0.1.3-macos-arm64.dmg.sha256"
+   shasum -a 256 -c "CodexBoard-1.0.0-macos-arm64.dmg.sha256"
    ```
 
    其他版本使用实际文件名。检查校验文件中的文件名与下载的 DMG 一致；必须得到 `OK`。失败就停止安装并重新核对下载来源，不修改校验值来通过检查。校验和用于检查文件完整性，不等于 Apple 公证或发布者身份认证。
