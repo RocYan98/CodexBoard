@@ -2,7 +2,7 @@
 /memory export-ignore
 /assets export-ignore
 
-# Publish only the screenshots displayed in the READMEs.
+# Publish only the images displayed in the READMEs.
 /docs/** export-ignore
 /docs/images -export-ignore
 /docs/images/desktop-taskboard.png -export-ignore
@@ -10,3 +10,4 @@
 /docs/images/mobile-remote.png -export-ignore
 /docs/images/web-desktop-redacted.png -export-ignore
 /docs/images/web-mobile-redacted.png -export-ignore
+/docs/images/codexboard.png -export-ignore

@@ -1,5 +1,7 @@
 # CodexBoard
 
+<img src="docs/images/codexboard.png" alt="CodexBoard" width="112" />
+
 **简体中文** · [English](README.en.md)
 
 连接项目与 Codex，让想法成为进展。
