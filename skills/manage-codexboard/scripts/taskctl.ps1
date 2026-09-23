@@ -6,8 +6,9 @@ function Fail-Board([string] $message) {
     exit 2
 }
 function Has-BoardCli([string] $directory) {
-    return (Test-Path -LiteralPath (Join-Path $directory 'runtime\bin\node.exe') -PathType Leaf) -and
-        (Test-Path -LiteralPath (Join-Path $directory 'runtime\packages\taskctl\dist\cli.js') -PathType Leaf)
+    # Filesystem APIs retain canonical \\?\ paths without PowerShell provider parsing.
+    return [IO.File]::Exists([IO.Path]::Combine($directory, 'runtime\bin\node.exe')) -and
+        [IO.File]::Exists([IO.Path]::Combine($directory, 'runtime\packages\taskctl\dist\cli.js'))
 }
 function Quote-BoardArgument([string] $value) {
     # CommandLineToArgvW / C-runtime quoting preserves empty strings and quotes.
@@ -27,7 +28,7 @@ try {
         # tauri.windows.conf.json: currentUser + productName CodexBoard Windows Test.
         foreach ($base in @($env:LOCALAPPDATA, $env:ProgramW6432, $env:ProgramFiles)) {
             if ([string]::IsNullOrWhiteSpace($base)) { continue }
-            $candidate = Join-Path $base 'CodexBoard Windows Test'
+            $candidate = [IO.Path]::Combine($base, 'CodexBoard Windows Test')
             if (Has-BoardCli $candidate) { $boardApp = $candidate; break }
         }
         if (-not $boardApp) { Fail-Board 'Windows installation not found. Set CODEXBOARD_APP_PATH for a custom install directory.' }
@@ -36,10 +37,10 @@ try {
         if ([string]::IsNullOrWhiteSpace($env:CODEXBOARD_DATA_DIR)) { Fail-Board 'CODEXBOARD_DATA_DIR is empty.' }
     } else {
         if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { Fail-Board 'LOCALAPPDATA is missing. Set CODEXBOARD_DATA_DIR explicitly.' }
-        $env:CODEXBOARD_DATA_DIR = Join-Path $env:LOCALAPPDATA 'CodexBoard\data'
+        $env:CODEXBOARD_DATA_DIR = [IO.Path]::Combine($env:LOCALAPPDATA, 'CodexBoard\data')
     }
-    $node = Join-Path $boardApp 'runtime\bin\node.exe'
-    $cli = Join-Path $boardApp 'runtime\packages\taskctl\dist\cli.js'
+    $node = [IO.Path]::Combine($boardApp, 'runtime\bin\node.exe')
+    $cli = [IO.Path]::Combine($boardApp, 'runtime\packages\taskctl\dist\cli.js')
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $node
     $start.UseShellExecute = $false

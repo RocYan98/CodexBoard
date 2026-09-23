@@ -265,3 +265,13 @@ Mac 文件位于 `~/Downloads/CodexBoard-Windows-Test-492b4db/`；无影文件�
 进一步以 `86e1e09` 的真实 runtime 脚本、命名路径形式的资源目录及全新的 `runtime-diag-86e1e09/` 数据目录运行，添加上述 Node 参数并通过 stdin 请求停止。实测返回启动状态、预期的缺少连接配置提示、`id: 42, ok: true` 的停止响应和最终停止状态；进程退出码 0，标准错误长度 0。输出保存在同一测试 Downloads 目录的 `runtime-diagnostic.jsonl` 与 `runtime-diagnostic.err`。诊断未配置公网入口或启动业务任务；还需把该入口参数接入原生启动边界并重新验证完整安装包。
 
 随后仅在一次测试应用进程的环境中传入 `NODE_OPTIONS=--preserve-symlinks-main`，未修改系统环境变量。完整应用实际进入使用引导，服务概览显示预期的未配置提示，原先“服务管理器已退出”的故障不再出现。该次诊断使用临时替换的脚本与进程级参数，不能代替修复后安装包在不带参数覆盖时的验收；Skill 原生入口会清除 `NODE_OPTIONS`，仍需新原生程序验证。
+
+该诊断应用关闭窗口后仍驻留托盘，通过“显示主窗口”恢复成功；随后选择“退出 CodexBoard”，应用主进程和安装目录下的 Node 进程均已退出。现有官方 Codex 会话未受操作。
+
+### 大写入口与 PowerShell 命名路径回归
+
+提交 `a17b7e99ee083a11f65437c9d71442dd75516288` 的 [Actions 运行 35810128167](https://github.com/RocYan98/CodexBoard/actions/runs/35810128167) 已通过 Node/Web 构建、Rust 编译及 contracts、taskctl、server、web 测试。scripts 仍有 2 项失败，desktop-scripts 仍有 3 项失败：4 项为整体大写路径使 `.mjs` 变为 `.MJS`，触发 Node 的 `ERR_UNKNOWN_FILE_EXTENSION`；另一项为 PowerShell 包装器无法处理命名空间安装目录。普通命名空间入口已通过。保存测试报告后取消了仍在执行的安装包构建。
+
+无影以含 `import` 的独立 ESM 临时文件复现相同的大写扩展名失败。先用 `realpathSync.native` 恢复实际文件名大小写，再带上述 Node 参数启动，返回 `ESM_OK`、退出码 0。Rust 原有临时脚本只有 CommonJS 兼容语句，不能暴露此问题；回归现已加入 `type: module`、显式 `import/export`，保留大写命名路径用例。PowerShell 路径拼接和文件检查改用 .NET 文件系统 API；无影也确认反斜杠命名路径的 `File.Exists` 和 `Process.Start` 可成功运行捆绑 Node，退出码 0。
+
+这些定位结果仍需新一轮完整 Windows CI 和新安装包无参数覆盖启动验证。

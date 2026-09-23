@@ -19,9 +19,10 @@ function fixture(t) {
   mkdirSync(dirname(node), { recursive: true });
   mkdirSync(dirname(cli), { recursive: true });
   cpSync(process.execPath, node);
+  writeFileSync(join(app, "runtime/packages/taskctl/package.json"), '{"type":"module"}');
   writeFileSync(
     cli,
-    "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),data:process.env.CODEXBOARD_DATA_DIR}));process.exit(7)",
+    "import process from 'node:process'; console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),data:process.env.CODEXBOARD_DATA_DIR}));process.exit(7)",
   );
   const cwd = join(root, "unrelated project");
   mkdirSync(cwd);
@@ -75,20 +76,25 @@ test(
     });
   },
 );
-test(
-  "Windows Skill runs the bundled CLI from a namespaced installation path",
-  { skip: process.platform !== "win32" },
-  (t) => {
-    const f = fixture(t);
-    const result = f.run({ CODEXBOARD_APP_PATH: toNamespacedPath(f.app) }, ["--help"]);
-    assert.equal(result.status, 7, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      args: ["--help"],
-      cwd: f.cwd,
-      data: join(f.local, "CodexBoard/data"),
-    });
-  },
-);
+for (const [name, path] of [
+  ["namespaced", toNamespacedPath],
+  ["namespaced uppercase alias", (value) => toNamespacedPath(value.toUpperCase())],
+]) {
+  test(
+    `Windows Skill runs the bundled CLI from a ${name} installation path`,
+    { skip: process.platform !== "win32" },
+    (t) => {
+      const f = fixture(t);
+      const result = f.run({ CODEXBOARD_APP_PATH: path(f.app) }, ["--help"]);
+      assert.equal(result.status, 7, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        args: ["--help"],
+        cwd: f.cwd,
+        data: join(f.local, "CodexBoard/data"),
+      });
+    },
+  );
+}
 test(
   "Windows Skill discovers the configured per-user installer and rejects incomplete overrides",
   { skip: process.platform !== "win32" },

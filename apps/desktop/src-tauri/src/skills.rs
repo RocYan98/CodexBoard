@@ -47,20 +47,23 @@ fn run(app: &tauri::AppHandle, action: &str, options: Value) -> Result<Value, St
         .map_err(|_| "无法定位应用资源")?
         .join("runtime");
     let executable = tauri::process::current_binary(&app.env()).map_err(|_| "无法定位当前应用")?;
-    let mut child = crate::node_command::command(crate::node_path(&runtime))
-        .arg(runtime.join("desktop/skill-manager.mjs"))
-        .arg(action)
-        .arg(&runtime)
-        .arg(&app_data)
-        .arg(&home)
-        .arg(executable)
-        .env_remove("NODE_OPTIONS")
-        .env_remove("NODE_PATH")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| "随包 Skill 管理工具不可用，请重新安装应用。")?;
+    let mut child = crate::node_command::command(
+        crate::node_path(&runtime),
+        runtime.join("desktop/skill-manager.mjs"),
+    )
+    .map_err(|_| "随包 Skill 管理工具不可用，请重新安装应用。")?
+    .arg(action)
+    .arg(&runtime)
+    .arg(&app_data)
+    .arg(&home)
+    .arg(executable)
+    .env_remove("NODE_OPTIONS")
+    .env_remove("NODE_PATH")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()
+    .map_err(|_| "随包 Skill 管理工具不可用，请重新安装应用。")?;
     if let Some(mut input) = child.stdin.take() {
         if writeln!(input, "{options}").is_err() {
             let _ = child.kill();
