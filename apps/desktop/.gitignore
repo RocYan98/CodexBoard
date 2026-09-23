@@ -1,5 +1,5 @@
-.cache/
+.cache
 staging/
 dist/
-src-tauri/target/
+src-tauri/target
 src-tauri/gen/

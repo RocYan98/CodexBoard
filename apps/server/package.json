@@ -5,13 +5,11 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "npm run build -w @codexboard/contracts && tsx watch src/main.ts",
     "start": "node dist/main.js",
     "db:migrate": "tsx src/migrate.ts",
     "ops": "tsx src/ops.ts",
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config vitest.config.ts"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

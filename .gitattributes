@@ -11,3 +11,37 @@
 /docs/images/web-desktop-redacted.png -export-ignore
 /docs/images/web-mobile-redacted.png -export-ignore
 /docs/images/codexboard.png -export-ignore
+
+# Development-only files stay in the private source tree.
+/e2e export-ignore
+**/*.test.* export-ignore
+**/*.spec.* export-ignore
+**/test export-ignore
+**/tests export-ignore
+**/vitest.config.* export-ignore
+/playwright.config.ts export-ignore
+/tsconfig.tools.json export-ignore
+/eslint.config.js export-ignore
+/.prettierignore export-ignore
+/.prettierrc.json export-ignore
+/.env.example export-ignore
+/deploy export-ignore
+/scripts/test-support export-ignore
+/scripts/fake-codex-app-server.mjs export-ignore
+/scripts/fake-codex-desktop.mjs export-ignore
+/scripts/check-codex-protocol.mjs export-ignore
+/scripts/probe-codex-desktop-ipc.mjs export-ignore
+/scripts/record-task-delivery.mjs export-ignore
+/scripts/run-ci-tests.mjs export-ignore
+/scripts/run-e2e.mjs export-ignore
+/scripts/generate-sf-symbol-assets.m export-ignore
+/scripts/prepare-public-source.py export-ignore
+/scripts/README.md export-ignore
+/apps/desktop/README.md export-ignore
+/apps/desktop/licenses/README.md export-ignore
+/apps/web/src/assets/sf-symbols/README.md export-ignore
+/skills/manage-codexboard/README.md export-ignore
+
+# Never export local build-cache links or generated native output.
+/apps/desktop/.cache export-ignore
+/apps/desktop/src-tauri/target export-ignore

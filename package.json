@@ -19,46 +19,21 @@
     "apps/web"
   ],
   "scripts": {
-    "dev": "npm run build -w @codexboard/contracts && concurrently -k -n project-sync,server,web -c cyan,green,yellow \"npm run dev:project-sync\" \"npm run dev -w @codexboard/server\" \"npm run dev -w @codexboard/web\"",
-    "dev:project-sync": "node scripts/codex-project-snapshot.mjs --state-file ${CODEX_HOME:-$HOME/.codex}/.codex-global-state.json --snapshot-file \"$PWD/.data/run/codex-projects.json\"",
-    "dev:server": "npm run dev -w @codexboard/server",
-    "dev:web": "npm run dev -w @codexboard/web",
     "db:migrate": "npm run db:migrate -w @codexboard/server",
     "ops:backup": "npm run ops -w @codexboard/server -- backup",
     "ops:verify": "npm run ops -w @codexboard/server -- verify",
     "ops:restore": "npm run ops -w @codexboard/server -- restore",
-    "codex:protocol:check": "node scripts/check-codex-protocol.mjs",
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "tsc --noEmit -p tsconfig.tools.json && npm run typecheck --workspaces --if-present",
-    "lint": "eslint . --max-warnings=0",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "pretest": "npm run build -w @codexboard/contracts && npm run build -w @codexboard/taskctl",
-    "test": "npm run test --workspaces --if-present && npm run test:scripts",
-    "test:scripts": "node --test scripts/*.test.mjs",
-    "test:e2e": "node scripts/run-e2e.mjs",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run codex:protocol:check && npm run test && npm run build",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "build:desktop": "node apps/desktop/scripts/build-macos.mjs",
     "release:desktop": "node apps/desktop/scripts/release-macos.mjs",
     "build:desktop:windows": "node apps/desktop/scripts/build-windows.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "2.11.4",
     "@types/node": "^26.4.0",
-    "@vitest/coverage-v8": "^4.1.11",
-    "concurrently": "^10.0.5",
-    "eslint": "^10.9.1",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.5",
-    "globals": "^17.11.0",
-    "prettier": "^3.9.6",
     "tsx": "^4.23.13",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.68.0",
-    "vitest": "^4.1.11"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "smol-toml": "1.8.0"
