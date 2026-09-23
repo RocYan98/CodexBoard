@@ -13,3 +13,6 @@ package-lock.json
 # Preserve upstream license bytes and their verified checksums.
 apps/desktop/licenses/**/LICENSE*
 apps/desktop/licenses/**/COPYRIGHT*
+
+# Objective-C include fragment; not a standalone formatter input.
+apps/desktop/native/knot-path.inc
