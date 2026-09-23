@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import { join, resolve, isAbsolute, dirname, win32 } from "node:path";
 import { homedir, tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import net from "node:net";
@@ -1030,4 +1030,19 @@ async function main() {
   publish();
   if (!initializationError) queue = queue.then(() => start());
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+// Tauri canonicalizes resource paths; on Windows this adds a \\?\ prefix.
+// Preserve explicit symlink entry points, then resolve the real file so case
+// aliases and encoded names identify the same entry point.
+function isEntryPoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      pathToFileURL(process.argv[1]).href === import.meta.url ||
+      pathToFileURL(realpathSync.native(process.argv[1])).href === import.meta.url
+    );
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) await main();

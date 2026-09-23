@@ -9,11 +9,11 @@ import { loadDesktopSession } from "./codex-desktop-loader.mjs";
 import { connectDesktopSession } from "./codex-desktop-session.mjs";
 import { spawn } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
-import { accessSync, chmodSync, constants } from "node:fs";
+import { accessSync, chmodSync, constants, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { delimiter, isAbsolute, join } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 import { isWindowsPipePath, localEndpointPath } from "./codex-local-endpoint.mjs";
 
@@ -618,7 +618,17 @@ export async function createCodexSessionBridge({
   };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+let isEntrypoint = false;
+try {
+  isEntrypoint = Boolean(
+    process.argv[1] &&
+    (pathToFileURL(process.argv[1]).href === import.meta.url ||
+      pathToFileURL(realpathSync.native(process.argv[1])).href === import.meta.url),
+  );
+} catch {
+  // Importing this module does not require the host's argv[1] to exist.
+}
+if (isEntrypoint) {
   const codexPath = process.argv[process.argv.indexOf("--codex") + 1];
   const endpoint = process.argv[process.argv.indexOf("--listen") + 1];
   if (!codexPath || (!endpoint?.startsWith("unix://") && !endpoint?.startsWith("npipe://")))

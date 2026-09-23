@@ -217,3 +217,41 @@ fb4745f5378c8a4122f74643a3c7c1000da5f4b184f0d9dc9faf275c79ac73a4
 ```
 
 结果保存在既有 Downloads 测试目录的 `ipc-probe.json`。探针只建立临时连接并发送 `initialize`，随后关闭连接；没有读取会话列表、订阅任务、读取历史或启动任务。该结果确认 Windows Desktop IPC 传输与初始化协议，不代替完整应用、用户权限隔离、真实任务执行或 Windows 11 验证。
+
+随后在同一云桌面直接运行 `findWindowsCodexPackage()`，成功返回该已登记包中的 CLI、桌面程序路径及 `OpenAI.Codex_2p2nqsd0c76g0!App`；结果位于 `windows-package.json`。
+
+`492b4dbddc325eba74f7c131294471160004ba92` 的权限实现、测试与 fixture helper 经 SHA-256 核对后，在无影运行 `node --test --test-reporter=spec private-file-permissions.test.mjs`。三项全部通过、零失败、零跳过、退出码 0：原子替换保留权限且拒绝真实 Everyone 读取授权；拒绝非文件和符号链接目录且不修改目标；独立读取 DACL 确认只含当前用户授权并关闭继承。原始输出为 `acl-test.txt`，可读摘要为 `acl-report.html`，均在上述 Downloads 目录。本次使用管理员账号，不能据此宣称普通用户之间的隔离测试已完成。
+
+### 第二轮完整 Windows 测试
+
+[Actions 运行 35806691028](https://github.com/RocYan98/CodexBoard/actions/runs/35806691028) 对应提交 `492b4dbddc325eba74f7c131294471160004ba92`。六组完整测试均以退出码 0 完成，JUnit 统计如下：
+
+| 测试组          | 总数 | 通过 | 失败 | 跳过 |
+| --------------- | ---: | ---: | ---: | ---: |
+| contracts       |   51 |   51 |    0 |    0 |
+| taskctl         |  103 |  103 |    0 |    0 |
+| server          |  613 |  611 |    0 |    2 |
+| web             |  204 |  204 |    0 |    0 |
+| scripts         |  117 |  117 |    0 |    0 |
+| desktop-scripts |  233 |  221 |    0 |   12 |
+| 合计            | 1321 | 1307 |    0 |   14 |
+
+Node/Web 构建、类型检查、ESLint 和 Rust Windows 全目标编译同时通过。跳过项为平台专属用例及原有条件跳过；Windows Skill 参数传递、真实 ACL、命名管道与桌面 UI 用例保持运行。测试通过不能替代安装包在真实桌面的安装与启动验证。
+
+### Windows 测试安装包
+
+第二轮 Actions 的安装作业与汇总作业均成功，生成 `windows-x64-test-installer-492b4dbddc325eba74f7c131294471160004ba92` artifact。安装程序为 `CodexBoard Windows Test_0.1.10_x64-setup.exe`，大小 `54561103` 字节；`build-info.json` 标记为 `win32` / `x64`、`signed: false`、`release: false`。本轮没有发布正式 Release。
+
+安装程序先在 Mac 下载并通过随包 SHA-256 校验，随后在无影下载同一 artifact 并解压，`Get-FileHash` 返回相同 SHA-256：
+
+```text
+37303ee7dd019fec8fb9c355a1a8677a4104f49b6b78d21856b457cb723b3269
+```
+
+Mac 文件位于 `~/Downloads/CodexBoard-Windows-Test-492b4db/`；无影文件位于上述 Downloads 测试目录下的 `installer-492b4db/`。
+
+### 首次安装实机检查发现入口判断问题
+
+无影中的 NSIS 向导自动安装 Microsoft WebView2 后完成安装；默认位置为 `C:\Users\admin\AppData\Local\CodexBoard Windows Test\`。已实际打开 CodexBoard 主窗口，但状态显示“服务管理器已退出，请重新打开应用”，应用内暂无运行日志。安装包内的 Node 可以运行 `runtime/packages/taskctl/dist/cli.js --help` 并返回退出码 0。通过托盘“退出 CodexBoard”正常退出后，主程序进程数为 0。
+
+随后只读比较 Windows 路径，确认 Tauri 传入的 `\\?\C:\...\runtime\desktop\runtime.mjs` 与 Node 模块 URL 转回的 `C:\...\runtime\desktop\runtime.mjs` 在原始字符串比较中不相等。现有 `resolve(process.argv[1]) === fileURLToPath(import.meta.url)` 入口判断因此可能跳过主函数；该检查没有导入或运行服务管理器、读取配置或启动业务任务。本安装包的桌面运行验证判定为未通过，继续修复入口判断后复测，不能将本轮 CI 成功等同于实机启动成功。

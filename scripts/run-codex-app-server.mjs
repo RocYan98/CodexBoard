@@ -1,7 +1,7 @@
 import { createCodexSessionBridge } from "./codex-session-bridge.mjs";
-import { accessSync, constants, lstatSync, readFileSync } from "node:fs";
+import { accessSync, constants, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { assertPrivateFileSync } from "./private-file-permissions.mjs";
 
 import {
@@ -125,8 +125,17 @@ export async function runCodexAppServer(arguments_) {
   }
 }
 
-const entrypoint = process.argv[1] ? resolve(process.argv[1]) : "";
-if (entrypoint && fileURLToPath(import.meta.url) === entrypoint) {
+let isEntrypoint = false;
+try {
+  isEntrypoint = Boolean(
+    process.argv[1] &&
+    (pathToFileURL(process.argv[1]).href === import.meta.url ||
+      pathToFileURL(realpathSync.native(process.argv[1])).href === import.meta.url),
+  );
+} catch {
+  // Importing this module does not require the host's argv[1] to exist.
+}
+if (isEntrypoint) {
   try {
     process.exitCode = await runCodexAppServer(process.argv.slice(2));
   } catch {

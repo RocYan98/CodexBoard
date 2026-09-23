@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { desktopIpcPath, isWindowsPipePath } from "./codex-local-endpoint.mjs";
 
 // Initialize a temporary client only: no thread discovery, subscription, history
@@ -73,7 +74,17 @@ export function probeDesktopIpc({
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+let isEntrypoint = false;
+try {
+  isEntrypoint = Boolean(
+    process.argv[1] &&
+    (pathToFileURL(process.argv[1]).href === import.meta.url ||
+      pathToFileURL(realpathSync.native(process.argv[1])).href === import.meta.url),
+  );
+} catch {
+  // Importing this module does not require the host's argv[1] to exist.
+}
+if (isEntrypoint) {
   try {
     process.stdout.write(`${JSON.stringify(await probeDesktopIpc())}\n`);
   } catch {
