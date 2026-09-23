@@ -21,13 +21,113 @@ import {
   chmodSync,
 } from "node:fs";
 import { join, resolve, isAbsolute, dirname, win32 } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { constants as osConstants, homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
+import { getSystemErrorMap } from "node:util";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import net from "node:net";
 import https from "node:https";
 import http from "node:http";
+
+const startupMessages = new Map([
+  ["CONFIG_INVALID", "服务配置无效"],
+  ["MIGRATION_FAILED", "数据库迁移失败"],
+  ["IDENTITY_MIGRATION_PREFLIGHT_FAILED", "旧用户身份迁移检查失败"],
+  ["INTERNAL_ERROR", "服务启动失败"],
+]);
+const startupErrorNames = new Set([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "ReferenceError",
+  "URIError",
+  "EvalError",
+  "AggregateError",
+  "AbortError",
+  "SystemError",
+  "SqliteError",
+  "ConfigError",
+  "MigrationError",
+  "IdentityMigrationPreflightError",
+  "UnknownError",
+]);
+const startupSystemCodes = new Set([
+  ...[...getSystemErrorMap().values()].map(([name]) => name),
+  "ERR_DLOPEN_FAILED",
+  "ERR_MODULE_NOT_FOUND",
+  "ERR_PACKAGE_PATH_NOT_EXPORTED",
+  "ERR_PACKAGE_IMPORT_NOT_DEFINED",
+  "ERR_UNKNOWN_FILE_EXTENSION",
+  "ERR_REQUIRE_ESM",
+  "ERR_INVALID_ARG_TYPE",
+  "ERR_INVALID_ARG_VALUE",
+  "ERR_UNSUPPORTED_DIR_IMPORT",
+  "SQLITE_ERROR",
+  "SQLITE_BUSY",
+  "SQLITE_LOCKED",
+  "SQLITE_READONLY",
+  "SQLITE_IOERR",
+  "SQLITE_CORRUPT",
+  "SQLITE_NOTADB",
+  "SQLITE_CANTOPEN",
+  "SQLITE_FULL",
+  "SQLITE_PERM",
+  "SQLITE_AUTH",
+  "SQLITE_CONSTRAINT",
+  "SQLITE_MISMATCH",
+]);
+const nodeLoaderCodes = new Set([
+  "ERR_MODULE_NOT_FOUND",
+  "MODULE_NOT_FOUND",
+  "ERR_DLOPEN_FAILED",
+  "ERR_UNKNOWN_FILE_EXTENSION",
+  "ERR_PACKAGE_PATH_NOT_EXPORTED",
+  "ERR_PACKAGE_IMPORT_NOT_DEFINED",
+  "ERR_UNSUPPORTED_DIR_IMPORT",
+  "ERR_REQUIRE_ESM",
+  "EISDIR",
+]);
+
+export function runtimeLogMessage(line, allowStartupError = false) {
+  try {
+    const record = JSON.parse(line);
+    // main.ts has a distinct, sanitized startup-error envelope. Never render
+    // its arbitrary message/stack or unknown class/code strings from stderr.
+    if (allowStartupError && record?.level === "error" && startupMessages.has(record.code)) {
+      const details = [record.code];
+      if (startupErrorNames.has(record.errorName)) details.push(record.errorName);
+      if (startupSystemCodes.has(record.systemErrorCode)) details.push(record.systemErrorCode);
+      return `${startupMessages.get(record.code)} [${details.join("; ")}]`;
+    }
+    if (
+      record?.msg &&
+      !["incoming request", "request completed", "handled request"].includes(record.msg)
+    )
+      return record.msg;
+  } catch {
+    // Native diagnostics can contain credentials; suppress raw lines.
+  }
+  if (allowStartupError) {
+    // Static imports fail before main.ts can emit its JSON envelope. Recognize
+    // only Node's fixed code markers and discard the entire original line.
+    const code =
+      /^\s*(?:Error|TypeError) \[([A-Z_]+)\]:/.exec(line)?.[1] ||
+      /^\s*code: ['"]([A-Z_]+)['"],?\s*$/.exec(line)?.[1] ||
+      /^\s*Error: (EISDIR):/.exec(line)?.[1];
+    if (nodeLoaderCodes.has(code)) return `Node 加载失败 [${code}]`;
+  }
+  return null;
+}
+
+export function runtimeExitMessage(code, signal) {
+  const details = [];
+  if (Number.isInteger(code) && code >= 0 && code <= 0xffffffff) details.push(`退出码 ${code}`);
+  if (typeof signal === "string" && Object.hasOwn(osConstants.signals, signal))
+    details.push(`信号 ${signal}`);
+  return `服务意外退出${details.length ? `（${details.join("，")}）` : ""}，正在停止其余服务`;
+}
 
 export function runtimeBinary(root, name, platform = process.platform) {
   return (platform === "win32" ? win32 : { join }).join(
@@ -747,20 +847,12 @@ async function main() {
     for (const stream of [child.stdout, child.stderr])
       createInterface({ input: stream }).on("line", (line) => {
         // Log only known message fields; never include headers, env, tokens or request bodies.
-        try {
-          const record = JSON.parse(line);
-          if (
-            record.msg &&
-            !["incoming request", "request completed", "handled request"].includes(record.msg)
-          )
-            log(name, record.msg);
-        } catch {
-          /* Native diagnostics can contain credentials; suppress raw lines. */
-        }
+        const message = runtimeLogMessage(line, name === "CodexBoard 后端");
+        if (message) log(name, message);
       });
-    child.on("close", () => {
+    child.on("close", (code, signal) => {
       if (!children.includes(child)) return;
-      log(name, "服务意外退出，正在停止其余服务");
+      log(name, runtimeExitMessage(code, signal));
       void stop().then(() => {
         state.phase = "error";
         state.message = `${name} 意外退出，请检查配置后重试`;

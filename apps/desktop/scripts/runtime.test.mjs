@@ -4,7 +4,112 @@ import { parseEnv, nativeEnvironment, assertPortsFree, stopChildren } from "./ru
 import net from "node:net";
 import { EventEmitter } from "node:events";
 import { join, resolve } from "node:path";
-import { runtimeBinary, runtimeEnvironment } from "./runtime.mjs";
+import {
+  runtimeBinary,
+  runtimeEnvironment,
+  runtimeLogMessage,
+  runtimeExitMessage,
+} from "./runtime.mjs";
+
+test("backend startup errors expose known diagnostic codes without stderr messages or secrets", () => {
+  const line = JSON.stringify({
+    level: "error",
+    code: "INTERNAL_ERROR",
+    errorName: "SqliteError",
+    systemErrorCode: "SQLITE_CANTOPEN",
+    message: "token=must-not-leak",
+    stack: "private file contents",
+    env: { APP_SECRET: "must-not-leak" },
+  });
+  assert.equal(
+    runtimeLogMessage(line, true),
+    "服务启动失败 [INTERNAL_ERROR; SqliteError; SQLITE_CANTOPEN]",
+  );
+  assert.equal(runtimeLogMessage(line), null);
+  assert.equal(
+    runtimeLogMessage(
+      JSON.stringify({ level: "error", code: "CONFIG_INVALID", errorName: "ConfigError" }),
+      true,
+    ),
+    "服务配置无效 [CONFIG_INVALID; ConfigError]",
+  );
+  assert.equal(
+    runtimeLogMessage(
+      JSON.stringify({ level: "error", code: "INTERNAL_ERROR", systemErrorCode: "ENOENT" }),
+      true,
+    ),
+    "服务启动失败 [INTERNAL_ERROR; ENOENT]",
+  );
+});
+
+test("runtime logs reject unknown startup fields and preserve existing structured message filtering", () => {
+  for (const line of [
+    "token=must-not-leak",
+    "null",
+    JSON.stringify({ message: "token=must-not-leak" }),
+    JSON.stringify({ level: "error", code: "SECRET_VALUE", message: "must-not-leak" }),
+    JSON.stringify({ level: "info", code: "CONFIG_INVALID", message: "must-not-leak" }),
+  ])
+    assert.equal(runtimeLogMessage(line, true), null);
+  assert.equal(
+    runtimeLogMessage(
+      JSON.stringify({
+        level: "error",
+        code: "INTERNAL_ERROR",
+        errorName: "SECRET_VALUE",
+        systemErrorCode: "SECRET_VALUE",
+        message: "must-not-leak",
+        msg: "must-not-leak",
+      }),
+      true,
+    ),
+    "服务启动失败 [INTERNAL_ERROR]",
+  );
+  assert.equal(
+    runtimeLogMessage('{"msg":"Public and local admin listeners are ready"}'),
+    "Public and local admin listeners are ready",
+  );
+  for (const msg of ["incoming request", "request completed", "handled request"])
+    assert.equal(runtimeLogMessage(JSON.stringify({ msg })), null);
+});
+
+test("owned process exit diagnostics accept only integer exit codes and known signals", () => {
+  assert.equal(runtimeExitMessage(1, null), "服务意外退出（退出码 1），正在停止其余服务");
+  assert.equal(
+    runtimeExitMessage(3221225786, null),
+    "服务意外退出（退出码 3221225786），正在停止其余服务",
+  );
+  assert.equal(
+    runtimeExitMessage(null, "SIGTERM"),
+    "服务意外退出（信号 SIGTERM），正在停止其余服务",
+  );
+  assert.equal(
+    runtimeExitMessage("token=secret", "SECRET_VALUE"),
+    "服务意外退出，正在停止其余服务",
+  );
+});
+
+test("backend Node loader diagnostics keep only recognized codes and never raw paths or messages", () => {
+  for (const [line, code] of [
+    ["Error [ERR_MODULE_NOT_FOUND]: Cannot find token=must-not-leak", "ERR_MODULE_NOT_FOUND"],
+    ["  code: 'MODULE_NOT_FOUND',", "MODULE_NOT_FOUND"],
+    ["  code: 'ERR_DLOPEN_FAILED'", "ERR_DLOPEN_FAILED"],
+    ["TypeError [ERR_UNKNOWN_FILE_EXTENSION]: secret path", "ERR_UNKNOWN_FILE_EXTENSION"],
+    ["Error: EISDIR: illegal operation on private path", "EISDIR"],
+  ]) {
+    assert.equal(runtimeLogMessage(line, true), `Node 加载失败 [${code}]`);
+    assert.equal(runtimeLogMessage(line), null);
+  }
+  for (const line of [
+    "Error [TOKEN_SECRET]: must-not-leak",
+    "  code: 'SECRET_VALUE',",
+    "  code: 'MODULE_NOT_FOUND', token=must-not-leak",
+    "A user said Error [ERR_MODULE_NOT_FOUND]: must-not-leak",
+    "    at C:\\private\\must-not-leak.mjs:1:1",
+  ])
+    assert.equal(runtimeLogMessage(line, true), null);
+});
+
 test("configured ports reach the backend, admin listener and embedded bridge", () => {
   const result = nativeEnvironment(
     {},
