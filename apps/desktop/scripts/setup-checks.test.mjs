@@ -308,7 +308,14 @@ test("omitted frpc serverPort defaults to 7000 and DNS/TCP failures stay actiona
 });
 
 test("DNS reports A/AAAA/CNAME and accepts an ingress address different from the FRP server", async () => {
-  const result = await runSetupChecks({ ...input, section: "dns" }, deps());
+  const result = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      lookup: async () => {
+        assert.fail("Valid direct DNS records must not require a system lookup");
+      },
+    }),
+  );
   assert.equal(one(result, "dns.records").status, "passed");
   assert.deepEqual(one(result, "dns.records").details, [
     "A：203.0.113.20",
@@ -316,6 +323,95 @@ test("DNS reports A/AAAA/CNAME and accepts an ingress address different from the
     "CNAME：gateway.example.test",
   ]);
   assert.equal(one(result, "dns.https").status, "passed");
+});
+
+test("direct DNS timeout falls back to bounded system resolution without claiming verified records", async () => {
+  const calls = [];
+  const result = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      timeoutMs: 10,
+      resolve4: () => new Promise(() => {}),
+      resolve6: () => new Promise(() => {}),
+      resolveCname: () => new Promise(() => {}),
+      lookup: async (...args) => {
+        calls.push(args);
+        return [
+          { address: "203.0.113.20", family: 4 },
+          { address: "2001:db8::20", family: 6 },
+          { address: "private-remote-output", family: 4 },
+          { address: "203.0.113.21", family: 6 },
+        ];
+      },
+      requestJson: async () => {
+        throw new Error("private-remote-output");
+      },
+    }),
+  );
+  assert.deepEqual(calls, [["tasks.example.test", { all: true }]]);
+  assert.equal(one(result, "dns.records").status, "passed");
+  assert.match(one(result, "dns.records").message, /系统域名解析可用.*直接 DNS 记录查询不可用/);
+  assert.match(one(result, "dns.records").message, /尚未核验公网 DNS 记录/);
+  assert.deepEqual(one(result, "dns.records").details, [
+    "系统 IPv4：203.0.113.20",
+    "系统 IPv6：2001:db8::20",
+  ]);
+  assert.equal(one(result, "dns.https").status, "failed");
+  safe(result);
+});
+
+test("CNAME alone and invalid system addresses cannot pass even when HTTPS is healthy", async () => {
+  for (const values of [
+    [],
+    [
+      null,
+      { address: "private-remote-output", family: 4 },
+      { address: "203.0.113.20", family: 6 },
+      { address: "2001:db8::20", family: "6" },
+    ],
+  ]) {
+    const result = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({
+        resolve4: async () => [],
+        resolve6: async () => [],
+        lookup: async () => values,
+      }),
+    );
+    assert.equal(one(result, "dns.records").status, "failed");
+    assert.match(one(result, "dns.records").message, /未得到可用的 IP 地址/);
+    assert.deepEqual(one(result, "dns.records").details, ["CNAME：gateway.example.test"]);
+    assert.equal(one(result, "dns.https").status, "passed");
+    safe(result);
+  }
+});
+
+test("system lookup errors and timeouts remain distinct from a negative DNS answer", async () => {
+  const unavailable = async () => {
+    throw Object.assign(new Error("private-remote-output"), { code: "ETIMEOUT" });
+  };
+  for (const lookup of [unavailable, () => new Promise(() => {})]) {
+    const result = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({ timeoutMs: 10, resolve4: unavailable, resolve6: unavailable, lookup }),
+    );
+    assert.equal(one(result, "dns.records").status, "failed");
+    assert.match(one(result, "dns.records").message, /均不可用.*无法确认/);
+    safe(result);
+  }
+  const result = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      resolve4: unavailable,
+      resolve6: unavailable,
+      lookup: async () => {
+        throw Object.assign(new Error("private-remote-output"), { code: "ENOTFOUND" });
+      },
+    }),
+  );
+  assert.equal(one(result, "dns.records").status, "failed");
+  assert.match(one(result, "dns.records").message, /未得到可用的 IP 地址/);
+  safe(result);
 });
 
 test("public IPv4 TCP ingress skips DNS and checks the explicit HTTP remote port", async () => {
@@ -370,12 +466,34 @@ test("missing DNS and HTTPS network/TLS errors do not pass or leak", async () =>
       resolve4: fail,
       resolve6: fail,
       resolveCname: fail,
+      lookup: fail,
       requestJson: fail,
     }),
   );
   assert.equal(one(result, "dns.records").status, "failed");
   assert.equal(one(result, "dns.https").status, "failed");
   safe(result);
+});
+
+test("Codex execution denial is reported without exposing command output or suggesting ACL changes", async () => {
+  for (const code of ["EACCES", "EPERM"]) {
+    const result = await runSetupChecks(
+      { ...input, section: "codex" },
+      deps({
+        execFile: async () => {
+          throw Object.assign(new Error(secret), {
+            code,
+            stdout: "Not logged in",
+            stderr: "private-remote-output",
+          });
+        },
+      }),
+    );
+    assert.equal(one(result, "codex.login").status, "failed");
+    assert.match(one(result, "codex.login").message, /系统拒绝执行 Codex 命令.*无法检查登录状态/);
+    assert.doesNotMatch(one(result, "codex.login").message, /尚未登录|ACL|修改权限/);
+    safe(result);
+  }
 });
 
 test("HTTPS requires the exact healthy project schema instead of any HTTP 200", async () => {

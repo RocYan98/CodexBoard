@@ -6,7 +6,11 @@ import { posix } from "node:path";
 import { promisify } from "node:util";
 import { runSetupChecks } from "./setup-checks.mjs";
 import { readFrpcOrigin, readFrpcDnsTarget } from "./frpc-config.mjs";
-import { findWindowsCodexPackage, windowsOpenArguments } from "#codex-windows-app";
+import {
+  findWindowsCodexCli,
+  findWindowsCodexPackage,
+  windowsOpenArguments,
+} from "#codex-windows-app";
 
 const appPaths = () => [
   "/Applications/Codex.app",
@@ -17,9 +21,15 @@ const appPaths = () => [
 
 export function detectCodexPath(
   exists = existsSync,
-  { platform = process.platform, findWindowsPackage = findWindowsCodexPackage } = {},
+  {
+    platform = process.platform,
+    env = process.env,
+    localAppData,
+    findWindowsPackage = findWindowsCodexPackage,
+  } = {},
 ) {
-  if (platform === "win32") return findWindowsPackage({ exists })?.cliPath || "codex.exe";
+  if (platform === "win32")
+    return findWindowsCodexCli({ env, localAppData, exists, findWindowsPackage }) || "";
   const candidates = [
     ...appPaths().map((path) => posix.join(path, "Contents/Resources/codex")),
     "/opt/homebrew/bin/codex",

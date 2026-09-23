@@ -40,6 +40,29 @@ export function findWindowsCodexPackage({ execute = execFileSync, exists = exist
   }
 }
 
+export function findWindowsCodexCli({
+  env = process.env,
+  localAppData = Object.entries(env).find(([key]) => key.toLowerCase() === "localappdata")?.[1],
+  exists = existsSync,
+  findWindowsPackage = findWindowsCodexPackage,
+} = {}) {
+  if (typeof localAppData === "string") {
+    const base = localAppData.replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "");
+    if (
+      /^(?:[a-z]:[\\/]|\\\\[^\\/]+\\[^\\/]+(?:\\|$))/i.test(base) &&
+      !/[<>:"|?*]/.test(base.replace(/^[a-z]:/i, "")) &&
+      ![...base].some((character) => character.charCodeAt(0) < 32) &&
+      !/(?:^|[\\/])\.{1,2}(?:[\\/]|$)/.test(base)
+    ) {
+      // The official standalone installer uses this one fixed per-user location.
+      // Keep Desktop package discovery independent; never run the CLI or scan PATH here.
+      const path = win32.join(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
+      if (exists(path)) return path;
+    }
+  }
+  return findWindowsPackage({ exists })?.cliPath;
+}
+
 export function windowsOpenArguments(target) {
   // Arguments are passed to PowerShell as a constant script, not through cmd.exe.
   // Only known URLs/AUMIDs and validated UUID deep links are used by callers.
