@@ -377,3 +377,51 @@ curl.exe --noproxy '*' --resolve test.rocyan.cn:58981:127.0.0.1 https://test.roc
 ```
 
 请求保留域名与 TLS SNI，只将目标解析到本机 Caddy；没有使用 `-k` 或绕过证书验证。响应为 `status: ok`、`service: codexboard-server`、`checks.http: ok`、`checks.sqlite: ok`，确认本机 Caddy 证书、TLS 和后台转发链路通过。公网 `443` 的同一健康接口仍在 Windows 与 Mac 两端发生 TLS 握手失败，Mac 禁用代理后也相同。当前故障范围已缩小到公网入口或隧道链路，尚未修复，不能将本机 HTTPS 成功记为公网验收通过。
+
+### 隔离启动与复制修复后的安装包
+
+提交 `961dde9` 的 [Actions 运行 35817063740](https://github.com/RocYan98/CodexBoard/actions/runs/35817063740) 中，六组报告合计 1355 项：1340 通过、1 失败、14 跳过。desktop-scripts 为 249 项中 237 通过、12 跳过，先前的中文目录复制与隔离后台启动检查通过。唯一失败在 server 的 `execution-http.test.ts`：双执行 worker 取消测试结束后，清理 `repository-2` 时返回 `EBUSY`，原始失败保留，因此本轮整体仍为 **failure**。
+
+安装作业独立通过随包后台健康、网页资源、未授权访问拒绝和 IPC 优雅退出的冒烟检查，成功产出 [测试安装包 artifact 10731323672](https://github.com/RocYan98/CodexBoard/actions/runs/35817063740/artifacts/10731323672)。Mac 使用 `gh run download` 下载并解压，再以 `shasum -c` 校验安装程序，结果为 `OK`，未单独核对 ZIP 摘要；无影 Windows 同时核对 ZIP 的官方摘要与安装程序摘要，两者均一致。`CodexBoard Windows Test_0.1.10_x64-setup.exe` 的 SHA-256 为：
+
+```text
+e3cc9eebf03b0dffb66438df920fcb01866435982448a078958fbb7e30a07479
+```
+
+server 清理失败定位为测试夹具未等待假执行器释放后仍在运行的真实 Git 工作区指纹采集。修复提交 `469708e946b77569f7f99a07a7be669c9ea514eb` 等待实际任务终态与指纹落盘，再关闭应用阻止新增采集，最后等待已开始的采集完成后清理目录；没有改产品停止语义、跳过用例、吞掉 `EBUSY` 或改为重试删除。该修复通过独立审查、本地 5 项 HTTP 回归、server 类型检查及格式和静态检查，Windows 测试结果见下节。
+
+无影已完成上述 `961dde9` 安装包的重装：先通过托盘正常退出旧应用并确认应用进程数为 0，再由 NSIS 在原目录 `C:\Users\admin\AppData\Local\CodexBoard Windows Test\` 安装并保留用户配置。点击 Finish 后正常启动，没有设置临时 `NODE_OPTIONS` 或替换随包脚本。主界面显示本机服务运行正常，后台与 Caddy 已连接、frp 运行中。
+
+安装后的三个关键文件与同一提交源码逐一核对，SHA-256 均一致：
+
+| 安装目录内文件                                   | SHA-256                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| `runtime\desktop\runtime.mjs`                    | `9e1df1b32f230d5b5174bc113df2c449d5166c610e10d6b31f6610c533ff5b7c` |
+| `runtime\scripts\windows-system-environment.mjs` | `fa8c8c41ece991516ae0e22ceca04b2d08a392be0672fcd6095d255ad4086f93` |
+| `runtime\scripts\codex-project-snapshot.mjs`     | `1d3181c32f6427703d9ca6bef4b81fe1771022a1ee3151a64bfa4960eafcf74b` |
+
+重装后再次以 `--resolve test.rocyan.cn:58981:127.0.0.1` 和正常证书验证请求本机 HTTPS 健康接口，返回 `status: ok`、`checks.http: ok`、`checks.sqlite: ok`；项目接口未登录请求返回 `401`。本轮确认 `961dde9` 原始安装包在现有用户配置下可正常启动并提供本机 HTTPS 服务。公网 `443` 最近一次检查仍为 TLS 握手失败；真实登录、CLI 用户配对和业务任务未验证。经 Git 差异核对，`469708e` 相比 `961dde9` 仅有测试夹具变化，产品源码和打包脚本未变，因此复用 `961dde9` 的实机验收，不要求重复云桌面安装；这不代表公网验收通过。
+
+### 清理修复后的 Windows 自动测试
+
+提交 `469708e946b77569f7f99a07a7be669c9ea514eb` 的 [Actions 运行 35818027885](https://github.com/RocYan98/CodexBoard/actions/runs/35818027885) 已完成，整体结论为 **success**，全部 10 个作业成功，包括安装作业和汇总作业。六组测试报告均为 `win32` / `x64` / Node `v22.23.2`、退出码 0。按报告核对如下：
+
+| 测试组          | 总数 | 通过 | 失败 | 跳过 |
+| --------------- | ---: | ---: | ---: | ---: |
+| contracts       |   51 |   51 |    0 |    0 |
+| taskctl         |  103 |  103 |    0 |    0 |
+| server          |  613 |  611 |    0 |    2 |
+| web             |  204 |  204 |    0 |    0 |
+| scripts         |  135 |  135 |    0 |    0 |
+| desktop-scripts |  249 |  237 |    0 |   12 |
+| 合计            | 1355 | 1341 |    0 |   14 |
+
+14 项均为平台条件跳过，Windows 打包后台冒烟检查实际运行并通过。此前 server 的工作区清理失败已通过；Rust 检查与构建作业也成功。独立核对安装作业原始日志，`2026-09-23T04:24:21Z` 记录随包后台健康、网页资源、未授权访问拒绝和 IPC 优雅退出四项冒烟检查通过，随后 NSIS 完成。
+
+最新构建产物为 [测试安装包 artifact 10732337440](https://github.com/RocYan98/CodexBoard/actions/runs/35818027885/artifacts/10732337440)，artifact ZIP 大小 `54560278` 字节，上传日志记录的官方 ZIP SHA-256 为：
+
+```text
+87e35ca1d94bb561fd4f1e2aa8b6881d2cfe477238165e6524fe5d17fd6fcd8e
+```
+
+最终证据由 `469708e` 的完整 Windows CI 与 `961dde9` 原始安装包的无影实机验收组成；`469708e` 相比 `961dde9` 仅有测试夹具变化，产品源码和打包脚本未变。无影已验证保留用户配置的重装、正常启动、本机 Caddy TLS、后台健康和未登录访问拒绝。公网 `443` 最近一次检查仍存在 TLS 握手失败，Codex 在线登录有效性、真实 Web/飞书登录、CLI 用户配对和业务任务执行均未验证。此处确认 Windows 自动构建、测试及本机安装运行通过，不代表公网、真实任务、Windows 11、标准用户隔离或正式签名发布已完成验收。
