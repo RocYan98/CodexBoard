@@ -1,7 +1,5 @@
 # CodexBoard
 
-<img src="assets/brand/codexboard.png" alt="CodexBoard" width="112" />
-
 [简体中文](README.md) · **English**
 
 Connect your projects to Codex and turn ideas into progress.

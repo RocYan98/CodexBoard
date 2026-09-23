@@ -1,5 +1,6 @@
 # Keep local development history out of release exports.
 /memory export-ignore
+/assets export-ignore
 
 # Publish only the screenshots displayed in the READMEs.
 /docs/** export-ignore
