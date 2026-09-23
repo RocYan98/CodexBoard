@@ -425,3 +425,59 @@ server 清理失败定位为测试夹具未等待假执行器释放后仍在运�
 ```
 
 最终证据由 `469708e` 的完整 Windows CI 与 `961dde9` 原始安装包的无影实机验收组成；`469708e` 相比 `961dde9` 仅有测试夹具变化，产品源码和打包脚本未变。无影已验证保留用户配置的重装、正常启动、本机 Caddy TLS、后台健康和未登录访问拒绝。公网 `443` 最近一次检查仍存在 TLS 握手失败，Codex 在线登录有效性、真实 Web/飞书登录、CLI 用户配对和业务任务执行均未验证。此处确认 Windows 自动构建、测试及本机安装运行通过，不代表公网、真实任务、Windows 11、标准用户隔离或正式签名发布已完成验收。
+
+### 使用引导的 DNS 与独立 Codex CLI 检查
+
+无影 Server 2022 的随包 Node `22.23.2` 实测：`dns.resolve4("test.rocyan.cn")` 返回 `ETIMEOUT`，系统 `lookup` 则立即返回 `101.133.133.237`、`family: 4`。提交 `62afde544869aba75ca4afadf691eaf1a82500ce` 因此保留直接 A/AAAA 查询，并在未取得有效 IP 时使用有超时限制的系统解析回退；回退成功明确提示尚未核验公网 DNS 记录，公网 HTTPS 检查仍独立进行。该修复及固定独立 CLI 路径发现已通过定向测试与独立审查，[Actions 运行 35820820836](https://github.com/RocYan98/CodexBoard/actions/runs/35820820836) 已完成且整体为 **success**，10 个作业全部成功。六组报告合计 1364 项：1350 通过、0 失败、14 项平台跳过；均为 `win32` / `x64` / Node `v22.23.2`、退出码 0，其中 desktop-scripts 242 项通过、scripts 139 项通过。
+
+PowerShell 直接执行 Codex 包内 CLI 的物理路径返回 `AccessDenied`；Node `22` 通过 `spawnSync` 执行同一路径的 `--version`，实际返回 `error.code: UNKNOWN`、`errno: -4094`，并非 `EACCES` 或 `EPERM`。manifest 声明了 `codex.exe` 执行别名，但包专属及全局别名均不存在；这些结果没有证明系统拒绝执行的具体原因，本轮包版本尚待核实。
+
+从 [官方独立 CLI 安装脚本](https://chatgpt.com/codex/install.ps1) 下载的内容在 Mac 与云桌面 SHA-256 一致，为 `3522b77d4485eac014e70fa946787c95fad3874a4e9047557c1e044eb268d13e`。脚本在安装前读取 `OSArchitecture` 时触发 `PropertyNotFoundStrict`，未完成安装。随后改用 GitHub 官方 Release 的完整 `0.154.0` Codex 包，校验 SHA-256 为 `94cc5b3632769504c809f6c0364b693c0dfddc5c30c8361095d2263a07ac45a4`，确认归档包含完整 `bin` 与资源后，解压到此前不存在的 `C:\Users\admin\AppData\Local\Programs\OpenAI\Codex`。
+
+独立 CLI 的 `--version` 返回 `0.154.0`，`login status` 仅记录固定判定 `logged_in: True`；没有读取认证文件或发送真实 Codex 请求，在线令牌及额度仍未验证。没有修改 WindowsApps ACL、PATH 或系统安全策略，也没有退出其他应用。应用新增发现逻辑只探测当前用户的 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe`，找不到时保留已登记 MSIX 包回退；Desktop 应用激活方式不变。
+
+公网检查取得了新的成功证据：云桌面直接调用已安装应用源码中的 `requestJson`，使用 3.5 秒中止限制和正常 TLS 验证，两次分别在约 3050 ms、2650 ms 返回 HTTP `200`、健康状态 `ok`。Mac 使用同一函数、完整健康响应 schema 校验、正常 TLS 和新连接，在约 1540 ms 返回 `200` 且健康；另外两次 Node 请求也通过。同期 curl 仍返回 TLS 错误 `35`，不能仅据该客户端错误判断证书有问题。用户反馈 Web 登录成功，但 Agent 未独立完成真实账号登录、CLI 用户配对或业务任务验证。
+
+另在云桌面直接调用既有安装源码的 `runSetupChecks({ section: "dns" })`，只传入不含凭据的最小 frpc 配置，得到 DNS 检查失败、公网 HTTPS 检查通过，健康请求返回 `200` 且为 `ok`；同一进程连续三次公网 HTTPS 检查均通过。该结果来自重装前的直接函数调用，不能替代下面的新包界面复测。
+
+本轮生成 [测试安装包 artifact 10733981386](https://github.com/RocYan98/CodexBoard/actions/runs/35820820836/artifacts/10733981386)，ZIP 大小 `54561619` 字节，官方 ZIP 摘要与安装程序摘要分别为：
+
+| 对象                                           | SHA-256                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| artifact ZIP（官方摘要）                       | `2d4687099a205c1136a95d9e2aca245a777be6cbf58291ceb04fe35e75e0d27f` |
+| `CodexBoard Windows Test_0.1.10_x64-setup.exe` | `35db728219a848ac37abb3f163d26c5cba7a967752bc111811cad9e67fc9decd` |
+
+Mac 已通过 `gh run download` 下载并解压到 `~/Downloads/CodexBoard-Windows-Test-62afde5/`，安装程序校验为 `OK`；未在 Mac 单独核对 ZIP 摘要。无影 Windows 已同时核对 ZIP 官方摘要与安装程序摘要，均一致。通过托盘正常退出旧 CodexBoard，确认安装目录下应用进程数为 0 后，NSIS 在原目录重装并保留用户配置；点击 Finish 后正常启动，后台与 Caddy 已连接、frp 运行中。
+
+安装后的三个修复文件与 `62afde5` 源码逐一核对，SHA-256 均一致：
+
+| 安装目录内文件                          | SHA-256                                                            |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `runtime\desktop\setup-checks.mjs`      | `6484a9abcd479ac800f39d58ad5ebc382033ad94c34b968109a0ee073e9f6290` |
+| `runtime\desktop\setup-controller.mjs`  | `5871b53f1d2c75e9143fe608d4d5f49182fb026a8d3b1d015159f907fd1fe652` |
+| `runtime\scripts\codex-windows-app.mjs` | `5594e243d641d03f6126b650d2d6b30ba2f873a31e0908cfb86abeb21a5259cf` |
+
+在新应用的 Web 使用引导中，从“未检查”点击“检查全部”，实际观察到各步骤进入“正在检查”并完成。首轮三个步骤均通过：frpc 配置、官方校验、配置部署、域名解析及公网 HTTPS 检查通过，界面确认 TLS 证书有效且响应为健康看板；Web 账号与 Codex 本地登录检查也通过。域名解析明确显示系统解析可用、IPv4 为 `101.133.133.237`，同时说明直接 DNS 记录查询不可用、尚未核验公网 DNS 记录。
+
+因先前出现间歇性故障，随后再次完整检查；第二轮域名解析、Web 账号与 Codex 本地登录仍通过，但公网 HTTPS 再次失败。新包安装与上述检查修复已得到实机验证，公网 HTTPS 的间歇性失败仍在排查，不能判定公网验收完成。Web 账号检查与 Codex 本地登录检查不代替真实用户登录、在线请求或业务任务验证。
+
+### 公网检查超时诊断与独立预算
+
+诊断提交 `a900b2f` 仅增加固定错误分类和白名单代码，不输出原始异常内容。云桌面正常退出后替换该检查模块并重启，完整引导与单独公网访问检查均返回 `SETUP_TIMEOUT`；域名解析、Web 账号与 Codex 本地登录通过。这确认失败不只发生于完整检查的并发场景，但尚不能确定具体网络延迟原因。
+
+提交 `7aa356b512dac5f7a97853e0e8a758cd1a2f0aa6` 为公网健康请求设置独立预算，默认及上限均为 10 秒，总时限与请求 socket timeout 使用同一预算和中止信号。其他检查仍默认 3.5 秒，TLS 证书验证、健康响应校验和不重试的行为不变。修复通过独立审查、45 项联测，以及测试调度与连接清理调整后受影响两项的重跑。[完整 Windows CI 35823733165](https://github.com/RocYan98/CodexBoard/actions/runs/35823733165) 已完成且为 **success**，10 个作业全部成功；六组报告合计 1371 项，1357 通过、0 失败、14 项平台跳过，均为 `win32` / `x64` / Node `v22.23.2`、退出码 0。desktop-scripts 为 249 通过、12 跳过；安装作业中随包后台健康、网页资源、未授权访问拒绝及 IPC 优雅退出的冒烟检查均通过。
+
+云桌面先用等效的单行 10 秒临时补丁验证：正常退出应用、确认进程为 0、核对模块 SHA-256 后重启，两轮 Web“检查全部”均实际进入“正在检查”、产生新的完成时间并全部通过；展开结果确认正常 TLS 与健康看板响应。空闲约 8 分钟后，单独“检查访问”也通过。此处仅记录临时补丁验证，不能据此推广到所有 Windows 环境或真实业务任务。
+
+本轮完整构建生成 [测试安装包 artifact 10734157326](https://github.com/RocYan98/CodexBoard/actions/runs/35823733165/artifacts/10734157326)，校验信息如下：
+
+| 对象                                           |   字节数 | SHA-256                                                            |
+| ---------------------------------------------- | -------: | ------------------------------------------------------------------ |
+| artifact ZIP（官方摘要）                       | 54564045 | `752f96ff0095dd98958d5c46fca7cfa59c0fed86ebb9092feb6173054a153cce` |
+| `CodexBoard Windows Test_0.1.10_x64-setup.exe` | 54567017 | `bcbb4071c8fd5abdd8126e14aefac466ba43e30c5fb55450d8dc0c3b200e5f9d` |
+
+Mac 已下载到 `~/Downloads/CodexBoard-Windows-Test-7aa356b/` 并核对安装程序摘要，未单独核对 ZIP 摘要；无影 Windows 的 ZIP 与安装程序摘要均一致。云桌面正常退出旧应用并确认进程数为 0 后，通过 NSIS 在原目录完整重装、保留用户配置；点击 Finish 后正常启动，后台与 Caddy 已连接、frp 运行中。
+
+完整安装覆盖了临时补丁，安装后 `runtime\desktop\setup-checks.mjs` 的 SHA-256 为 `d314dc5b169251c62c58ea48c3eb7f859f5d519a5ff60d823cb9c06b03afec6d`，与 `7aa356b` 源码一致。此后未再修改随包脚本或设置临时环境。新包两轮 Web“检查全部”均观察到“正在检查”及新的完成时间（`2026-09-23T06:01:37.270Z`、`2026-09-23T06:02:38.718Z`），三个步骤全部通过；展开确认公网 HTTPS 证书与健康看板响应通过，Web 账号、Codex 本地登录及系统 DNS 回退通过。DNS 仍明确提示直接记录查询不可用、尚未核验公网 DNS 记录。
+
+本轮完成 `7aa356b` 的完整 Windows CI、原始新包重装和两轮实际使用引导验证。实机为无影 Windows Server 2022，未验证 Windows 11；具体网络延迟根因尚未确定，验证结果也不能代表所有 Windows 环境。Web 登录成功仍仅为用户反馈，Agent 未独立完成真实 Web/飞书登录、CLI 用户配对或业务执行，Codex 在线令牌与额度也未验证。
