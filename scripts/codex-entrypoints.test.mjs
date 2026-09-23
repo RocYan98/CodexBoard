@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, toNamespacedPath } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { nodeScriptArguments } from "./node-script-arguments.mjs";
 
 const entrypoints = [
   ["run-codex-app-server.mjs", /CODEX_BRIDGE_START_FAILED/],
@@ -14,18 +15,21 @@ const entrypoints = [
 
 for (const [name, expectedError] of entrypoints) {
   const path = fileURLToPath(new URL(name, import.meta.url));
-  const variants = [["ordinary", path]];
+  const variants = [
+    ["ordinary", path, process.platform],
+    ["Windows worker arguments", path, "win32"],
+  ];
   if (process.platform === "win32") {
     variants.push(
-      ["namespaced", toNamespacedPath(path)],
-      ["namespaced uppercase alias", toNamespacedPath(path).toUpperCase()],
+      ["namespaced", toNamespacedPath(path), "win32"],
+      ["namespaced uppercase alias", toNamespacedPath(path).toUpperCase(), "win32"],
     );
   }
-  for (const [variant, entrypoint] of variants) {
+  for (const [variant, entrypoint, platform] of variants) {
     test(`${name} executes its CLI from a ${variant} path`, () => {
       // Missing options must enter CLI validation. No server, Codex worker or
       // Desktop session is started, even on a developer's signed-in machine.
-      const result = spawnSync(process.execPath, [entrypoint], {
+      const result = spawnSync(process.execPath, nodeScriptArguments(entrypoint, [], platform), {
         encoding: "utf8",
         timeout: 10_000,
         windowsHide: true,

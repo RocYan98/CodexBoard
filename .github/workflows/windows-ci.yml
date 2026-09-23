@@ -118,7 +118,7 @@ jobs:
           path: test-results/windows/${{ matrix.suite }}/
 
   desktop-check:
-    name: Windows x64 / Desktop Rust compilation
+    name: Windows x64 / Desktop Rust compilation and Node launch
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -127,10 +127,30 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.2
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: stable
+      - name: Test the native Node launch boundary
+        run: |
+          New-Item -ItemType Directory -Force test-results/windows/desktop-check | Out-Null
+          $launchTests = Join-Path $env:RUNNER_TEMP 'codexboard-node-launch-tests.exe'
+          rustc --edition=2021 --test apps/desktop/src-tauri/src/node_command.rs -o $launchTests 2>&1 |
+            Tee-Object -FilePath test-results/windows/desktop-check/node-launch-compile.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $launchTests --nocapture 2>&1 |
+            Tee-Object -FilePath test-results/windows/desktop-check/node-launch-tests.log
+          $launchExitCode = $LASTEXITCODE
+          @{
+            commit = $env:GITHUB_SHA
+            exitCode = $launchExitCode
+            scope = 'Native command builder launches actual Node scripts from canonical Windows paths.'
+          } | ConvertTo-Json | Set-Content -Encoding utf8 test-results/windows/desktop-check/node-launch-result.json
+          exit $launchExitCode
       - name: Check desktop code and test targets
+        if: ${{ !cancelled() }}
         run: |
           New-Item -ItemType Directory -Force test-results/windows/desktop-check | Out-Null
           rustc --version | Out-File test-results/windows/desktop-check/toolchain.txt
@@ -203,7 +223,7 @@ jobs:
           | --- | --- |
           | Node and web build, typecheck, lint | $env:BUILD_RESULT |
           | All six test suites | $env:TEST_RESULT |
-          | Desktop Rust compilation | $env:DESKTOP_RESULT |
+          | Desktop Rust compilation and native Node launch | $env:DESKTOP_RESULT |
           | Windows test installer | $env:INSTALLER_RESULT |
 
           Download per-suite logs, JUnit reports and compiled assets from this run's artifacts.

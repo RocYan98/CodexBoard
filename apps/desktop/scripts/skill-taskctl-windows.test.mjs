@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, toNamespacedPath } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -70,6 +70,20 @@ test(
     assert.equal(result.status, 7, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), {
       args,
+      cwd: f.cwd,
+      data: join(f.local, "CodexBoard/data"),
+    });
+  },
+);
+test(
+  "Windows Skill runs the bundled CLI from a namespaced installation path",
+  { skip: process.platform !== "win32" },
+  (t) => {
+    const f = fixture(t);
+    const result = f.run({ CODEXBOARD_APP_PATH: toNamespacedPath(f.app) }, ["--help"]);
+    assert.equal(result.status, 7, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      args: ["--help"],
       cwd: f.cwd,
       data: join(f.local, "CodexBoard/data"),
     });

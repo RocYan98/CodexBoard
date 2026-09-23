@@ -47,7 +47,7 @@ fn run(app: &tauri::AppHandle, action: &str, options: Value) -> Result<Value, St
         .map_err(|_| "无法定位应用资源")?
         .join("runtime");
     let executable = tauri::process::current_binary(&app.env()).map_err(|_| "无法定位当前应用")?;
-    let mut child = crate::quiet_command(crate::node_path(&runtime))
+    let mut child = crate::node_command::command(crate::node_path(&runtime))
         .arg(runtime.join("desktop/skill-manager.mjs"))
         .arg(action)
         .arg(&runtime)

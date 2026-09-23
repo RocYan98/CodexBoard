@@ -9,6 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { copyRuntimeScripts } from "./package-runtime.mjs";
 import { copyBundledSkill } from "./package-skills.mjs";
+import { nodeScriptArguments } from "../../../scripts/node-script-arguments.mjs";
 
 const project = fileURLToPath(new URL("../../..", import.meta.url));
 const windows = process.platform === "win32";
@@ -46,6 +47,7 @@ function fixture(t) {
       imports: {
         "#private-file-permissions": "./scripts/private-file-permissions.mjs",
         "#codex-windows-app": "./scripts/codex-windows-app.mjs",
+        "#node-script-arguments": "./scripts/node-script-arguments.mjs",
       },
     }),
   );
@@ -80,9 +82,10 @@ for (const [name, path, nodeArgs = []] of variants) {
       process.execPath,
       [
         ...nodeArgs,
-        path(join(f.root, "desktop/runtime.mjs"), f),
-        windows ? path(f.root, f) : f.root,
-        f.state,
+        ...nodeScriptArguments(path(join(f.root, "desktop/runtime.mjs"), f), [
+          windows ? path(f.root, f) : f.root,
+          f.state,
+        ]),
       ],
       { cwd: f.home, env: f.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
     );
@@ -143,12 +146,13 @@ for (const [name, path, nodeArgs = []] of variants) {
       process.execPath,
       [
         ...nodeArgs,
-        path(join(f.root, "desktop/skill-manager.mjs"), f),
-        "status",
-        windows ? path(f.root, f) : f.root,
-        f.state,
-        f.home,
-        process.execPath,
+        ...nodeScriptArguments(path(join(f.root, "desktop/skill-manager.mjs"), f), [
+          "status",
+          windows ? path(f.root, f) : f.root,
+          f.state,
+          f.home,
+          process.execPath,
+        ]),
       ],
       {
         cwd: f.home,

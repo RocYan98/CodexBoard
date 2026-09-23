@@ -2,6 +2,7 @@ import { manageWebAccounts } from "./web-accounts.mjs";
 import { readFrpcOrigin, isSupportedOrigin, readFrpcDnsTarget } from "./frpc-config.mjs";
 import { DEFAULT_PORTS, readLocalPorts, savePorts } from "./ports.mjs";
 import { createSetupController, detectCodexPath } from "./setup-controller.mjs";
+import { nodeScriptArguments } from "#node-script-arguments";
 import {
   ensurePrivateDirectorySync,
   ensurePrivateFileSync,
@@ -792,7 +793,7 @@ async function main() {
       launch(
         "CodexBoard 后端",
         node,
-        ["apps/server/dist/main.js"],
+        nodeScriptArguments(join(root, "apps/server/dist/main.js")),
         common,
         process.platform === "win32",
       );

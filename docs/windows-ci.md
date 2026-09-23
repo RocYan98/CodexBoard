@@ -255,3 +255,13 @@ Mac 文件位于 `~/Downloads/CodexBoard-Windows-Test-492b4db/`；无影文件�
 无影中的 NSIS 向导自动安装 Microsoft WebView2 后完成安装；默认位置为 `C:\Users\admin\AppData\Local\CodexBoard Windows Test\`。已实际打开 CodexBoard 主窗口，但状态显示“服务管理器已退出，请重新打开应用”，应用内暂无运行日志。安装包内的 Node 可以运行 `runtime/packages/taskctl/dist/cli.js --help` 并返回退出码 0。通过托盘“退出 CodexBoard”正常退出后，主程序进程数为 0。
 
 随后只读比较 Windows 路径，确认 Tauri 传入的 `\\?\C:\...\runtime\desktop\runtime.mjs` 与 Node 模块 URL 转回的 `C:\...\runtime\desktop\runtime.mjs` 在原始字符串比较中不相等。现有 `resolve(process.argv[1]) === fileURLToPath(import.meta.url)` 入口判断因此可能跳过主函数；该检查没有导入或运行服务管理器、读取配置或启动业务任务。本安装包的桌面运行验证判定为未通过，继续修复入口判断后复测，不能将本轮 CI 成功等同于实机启动成功。
+
+### 原生 Node 启动边界的进一步复现
+
+提交 `86e1e090dcdf30f4f582e49bb4863d2382894823` 修复入口 URL 比较、保留 POSIX 符号链接行为并加入真实 Windows 命名路径启动回归。[Actions 运行 35809032465](https://github.com/RocYan98/CodexBoard/actions/runs/35809032465) 中，contracts、taskctl、server、web、Node/Web 构建与 Rust 检查通过；scripts 为 126 项中 122 通过、4 失败，desktop-scripts 为 239 项中 223 通过、4 失败、12 跳过。新增的 8 项失败均发生在 Node 22.23.2 自身的入口解析阶段，报 `EISDIR: illegal operation on a directory, lstat 'C:'` 或 `lstat 'D:'`，尚未执行应用 JavaScript。已保存报告后取消仍在执行的旧安装包编译，避免继续产出已知启动链路存在问题的包。
+
+无影也用仅包含 `console.log("ENTRY_OK")` 的临时脚本复现：普通路径成功，添加 `\\?\` 前缀后报相同 `EISDIR`；添加 Node 的 `--preserve-symlinks-main` 参数后成功。此前仅临时替换已校验的 runtime/Skill 脚本不足以修复原生启动；原文件备份位于测试 Downloads 目录的 `entryfix-backup-492b4db/`。
+
+进一步以 `86e1e09` 的真实 runtime 脚本、命名路径形式的资源目录及全新的 `runtime-diag-86e1e09/` 数据目录运行，添加上述 Node 参数并通过 stdin 请求停止。实测返回启动状态、预期的缺少连接配置提示、`id: 42, ok: true` 的停止响应和最终停止状态；进程退出码 0，标准错误长度 0。输出保存在同一测试 Downloads 目录的 `runtime-diagnostic.jsonl` 与 `runtime-diagnostic.err`。诊断未配置公网入口或启动业务任务；还需把该入口参数接入原生启动边界并重新验证完整安装包。
+
+随后仅在一次测试应用进程的环境中传入 `NODE_OPTIONS=--preserve-symlinks-main`，未修改系统环境变量。完整应用实际进入使用引导，服务概览显示预期的未配置提示，原先“服务管理器已退出”的故障不再出现。该次诊断使用临时替换的脚本与进程级参数，不能代替修复后安装包在不带参数覆盖时的验收；Skill 原生入口会清除 `NODE_OPTIONS`，仍需新原生程序验证。

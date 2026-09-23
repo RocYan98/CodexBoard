@@ -387,6 +387,7 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
   }[];
   const command = snapshot[0]!.downloadCommand;
   expect(command.replaceAll("\\", "/")).toContain("/packages/taskctl/dist/cli.js'");
+  expect(command.includes("'--preserve-symlinks-main'")).toBe(process.platform === "win32");
   expect(command).toContain(`CODEXBOARD_DATA_DIR='${s.root}'`);
   const capabilityToken = "a".repeat(64);
   const cliAuth = new CliAuthService({
@@ -501,7 +502,9 @@ it("uses executor-visible paths for attachments when the server runs in Docker",
   );
   const prompt = String(queue.claimNext("worker")!.workContext.prompt);
   expect(prompt).toContain(
-    "'/opt/homebrew/bin/node' '/Users/example/Task Board/packages/taskctl/dist/cli.js'",
+    process.platform === "win32"
+      ? "'/opt/homebrew/bin/node' '--preserve-symlinks-main' '/Users/example/Task Board/packages/taskctl/dist/cli.js'"
+      : "'/opt/homebrew/bin/node' '/Users/example/Task Board/packages/taskctl/dist/cli.js'",
   );
   expect(prompt).toContain(`CODEXBOARD_DATA_DIR='${executorDataDirectory}'`);
   expect(queue.listTaskJobs(s.task.id)[0]!.workContext.attachmentSnapshot).toEqual([

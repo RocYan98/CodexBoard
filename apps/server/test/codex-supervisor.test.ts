@@ -92,6 +92,7 @@ describe("Codex App Server supervisor", () => {
     expect(spawnProcess).toHaveBeenCalledWith(
       process.execPath,
       [
+        ...(process.platform === "win32" ? ["--preserve-symlinks-main"] : []),
         expect.stringContaining(join("scripts", "codex-session-bridge.mjs")),
         "--codex",
         "codex",

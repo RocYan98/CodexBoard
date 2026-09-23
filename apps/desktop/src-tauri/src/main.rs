@@ -4,6 +4,7 @@ mod app_data;
 #[cfg(target_os = "windows")]
 #[path = "app_data_windows.rs"]
 mod app_data;
+mod node_command;
 mod skills;
 #[cfg(target_os = "macos")]
 mod skills_commit;
@@ -112,6 +113,7 @@ fn node_path(root: &std::path::Path) -> PathBuf {
 fn user_home() -> Option<std::ffi::OsString> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
 }
+#[cfg(windows)]
 fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
     let mut command = Command::new(program);
@@ -274,7 +276,7 @@ fn main() {
   app.manage(skills::Skills::default());
   setup_tray(app)?;
   let root=app.path().resource_dir()?.join("runtime");
-  let mut child=quiet_command(node_path(&root)).arg(root.join("desktop/runtime.mjs")).arg(&root).arg(&data).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+  let mut child=node_command::command(node_path(&root)).arg(root.join("desktop/runtime.mjs")).arg(&root).arg(&data).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
   let input=child.stdin.take();let output=child.stdout.take().unwrap();let snapshot=Arc::new(Mutex::new(json!({"phase":"starting","message":"正在启动服务管理器…","services":[],"logs":[],"settings":{}})));let copy=snapshot.clone();
   let update_stop_ack=Arc::new(Mutex::new(None));let ack=update_stop_ack.clone();
   std::thread::spawn(move||{for line in BufReader::new(output).lines().map_while(Result::ok){if let Ok(value)=serde_json::from_str::<Value>(&line){if let (Some(id),Some(ok))=(value["id"].as_u64(),value["ok"].as_bool()) { if id>=2 { *ack.lock().unwrap()=Some((id,ok)); } } if value["event"]=="state"{*copy.lock().unwrap()=value["data"].clone()}else if value["ok"]==false{copy.lock().unwrap()["message"]=value["error"].clone()}}}let mut s=copy.lock().unwrap();s["phase"]=json!("error");s["message"]=json!("服务管理器已退出，请重新打开应用");});

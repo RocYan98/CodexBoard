@@ -5,6 +5,7 @@ import { existsSync, lstatSync, unlinkSync } from "node:fs";
 import { createConnection } from "node:net";
 import type { Readable, Writable } from "node:stream";
 import { isWindowsPipePath, localEndpoint } from "../../../../../scripts/codex-local-endpoint.mjs";
+import { nodeScriptArguments } from "../../../../../scripts/node-script-arguments.mjs";
 
 export interface ManagedCodexProcess {
   readonly pid?: number;
@@ -114,13 +115,10 @@ export class CodexAppServerSupervisor {
     let ownedListenerReady = !windowsPipe;
     const child = this.#spawnProcess(
       process.execPath,
-      [
+      nodeScriptArguments(
         fileURLToPath(new URL("../../../../../scripts/codex-session-bridge.mjs", import.meta.url)),
-        "--codex",
-        this.#codexCommand,
-        "--listen",
-        localEndpoint(this.#socketPath),
-      ],
+        ["--codex", this.#codexCommand, "--listen", localEndpoint(this.#socketPath)],
+      ),
       {
         stdio: [windowsPipe ? "pipe" : "ignore", windowsPipe ? "pipe" : "ignore", "pipe"],
         ...(this.#token ? { env: { ...process.env, CODEXBOARD_BRIDGE_TOKEN: this.#token } } : {}),

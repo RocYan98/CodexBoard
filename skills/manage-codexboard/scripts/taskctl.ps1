@@ -44,7 +44,7 @@ try {
     $start.FileName = $node
     $start.UseShellExecute = $false
     $start.WorkingDirectory = (Get-Location).ProviderPath
-    $nativeArguments = @((Quote-BoardArgument $cli))
+    $nativeArguments = @('--preserve-symlinks-main', (Quote-BoardArgument $cli))
     foreach ($argument in $boardArguments) { $nativeArguments += Quote-BoardArgument ([string]$argument) }
     $start.Arguments = $nativeArguments -join ' '
     $process = [Diagnostics.Process]::Start($start)

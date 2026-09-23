@@ -4,6 +4,7 @@ import { identityKey, identityFromKey, IdentityKeySchema } from "@codexboard/con
 import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodeScriptArguments } from "../../../../../scripts/node-script-arguments.mjs";
 
 import {
   JobViewSchema,
@@ -192,7 +193,12 @@ export class ExecutionQueue {
           ".data",
       ),
     );
-    const executable = `${quote(options.executorNodePath ?? process.execPath)} ${quote(options.executorTaskctlPath ?? cli)}`;
+    const executable = [
+      options.executorNodePath ?? process.execPath,
+      ...nodeScriptArguments(options.executorTaskctlPath ?? cli),
+    ]
+      .map(quote)
+      .join(" ");
     this.#taskctlCommand =
       process.platform === "win32"
         ? `$env:CODEXBOARD_DATA_DIR=${data}; & ${executable}`

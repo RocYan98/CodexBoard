@@ -117,6 +117,7 @@ export const RUNTIME_SCRIPT_FILES = Object.freeze([
   "codex-thread-title.mjs",
   "codex-windows-app.mjs",
   "git-origin-reader.mjs",
+  "node-script-arguments.mjs",
   "private-file-permissions.mjs",
   "run-codex-app-server.mjs",
 ]);

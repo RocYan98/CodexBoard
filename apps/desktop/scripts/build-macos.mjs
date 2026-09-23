@@ -107,6 +107,7 @@ writeFileSync(
     imports: {
       "#private-file-permissions": "./scripts/private-file-permissions.mjs",
       "#codex-windows-app": "./scripts/codex-windows-app.mjs",
+      "#node-script-arguments": "./scripts/node-script-arguments.mjs",
     },
   }),
 );
