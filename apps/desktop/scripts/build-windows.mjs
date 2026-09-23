@@ -144,6 +144,7 @@ export async function buildWindows() {
   const smoke = await smokePackagedServer({
     runtimeRoot: runtime,
     nodePath: join(runtime, "bin/node.exe"),
+    diagnoseWindowsShell: true,
   });
   writeFileSync(join(runtime, "server-smoke.json"), `${JSON.stringify(smoke, null, 2)}\n`);
   process.stdout.write(

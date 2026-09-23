@@ -150,6 +150,7 @@ export async function smokePackagedServer({
   nodePath,
   timeoutMs = 120_000,
   onStage = () => {},
+  diagnoseWindowsShell = false,
 }) {
   if (!runtimeRoot || !nodePath) throw smokeError("SMOKE_EXPLICIT_PACKAGE_REQUIRED");
   // Match Tauri's canonical Windows resource directory, including the namespace
@@ -313,6 +314,22 @@ export async function smokePackagedServer({
         onStage("config-diagnostic");
         for (const code of smokeConfigDiagnostics({ runtimeRoot: root, nodePath, env }))
           diagnostics.add(code);
+      }
+      if (diagnoseWindowsShell && process.platform === "win32" && diagnostics.has("ACL_FAILED")) {
+        try {
+          const { diagnoseIsolatedPowerShell } =
+            await import("./isolated-powershell-diagnostic.mjs");
+          await diagnoseIsolatedPowerShell({
+            env,
+            cwd: root,
+            tokenFile,
+            fixtureRoot: scratch,
+            onResult: (result) =>
+              process.stdout.write(`SMOKE_WINDOWS_POWERSHELL ${JSON.stringify(result)}\n`),
+          });
+        } catch {
+          diagnostics.add("SMOKE_WINDOWS_DIAGNOSTIC_FAILED");
+        }
       }
       throw smokeError(outcome ? "SMOKE_BACKEND_EXITED" : "SMOKE_BACKEND_TIMEOUT", [
         ...diagnostics,

@@ -8,6 +8,7 @@ import {
   copyRuntimeDependencies,
   copyRuntimeDist,
   copyRuntimeScripts,
+  listRuntimeDependencyPaths,
 } from "./package-runtime.mjs";
 import { smokeConfigDiagnostics, smokePackagedServer } from "./server-smoke.mjs";
 
@@ -29,7 +30,9 @@ test(
     const nodePath =
       process.platform === "win32" ? join(runtimeRoot, "bin", "node.exe") : process.execPath;
     mkdirSync(join(runtimeRoot, "bin"), { recursive: true });
+    onStage("node-copy");
     if (process.platform === "win32") cpSync(process.execPath, nodePath);
+    onStage("application-copy");
     for (const workspace of ["apps/server", "packages/contracts", "packages/taskctl"]) {
       copyRuntimeDist(join(project, workspace, "dist"), join(runtimeRoot, workspace, "dist"));
       cpSync(
@@ -37,7 +40,9 @@ test(
         join(runtimeRoot, workspace, "package.json"),
       );
     }
+    onStage("web-copy");
     copyRuntimeDist(join(project, "apps/web/dist"), join(runtimeRoot, "apps/web/dist"));
+    onStage("runtime-scripts-copy");
     copyRuntimeScripts(project, runtimeRoot);
     writeFileSync(
       join(runtimeRoot, "package.json"),
@@ -46,13 +51,18 @@ test(
         imports: JSON.parse(readFileSync(join(project, "package.json"), "utf8")).imports,
       }),
     );
-    copyRuntimeDependencies(project, runtimeRoot);
+    onStage("dependency-list");
+    const dependencies = listRuntimeDependencyPaths(project);
+    onStage("dependency-copy");
+    copyRuntimeDependencies(project, runtimeRoot, dependencies);
+    onStage("workspace-copy");
     for (const name of ["contracts", "taskctl"])
       cpSync(
         join(runtimeRoot, "packages", name),
         join(runtimeRoot, "node_modules/@codexboard", name),
         { recursive: true },
       );
+    onStage("smoke-start");
     const result = await smokePackagedServer({ runtimeRoot, nodePath, onStage });
     assert.deepEqual(result, {
       status: "passed",
