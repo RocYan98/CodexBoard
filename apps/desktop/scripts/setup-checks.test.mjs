@@ -475,6 +475,81 @@ test("missing DNS and HTTPS network/TLS errors do not pass or leak", async () =>
   safe(result);
 });
 
+test("public probe failures distinguish timeout, connection and certificate codes without native output", async () => {
+  for (const [code, message] of [
+    ["SETUP_TIMEOUT", /探测超时/],
+    ["ETIMEDOUT", /探测超时/],
+    ["ABORT_ERR", /探测超时/],
+    ["ECONNRESET", /连接失败或已中断/],
+    ["ECONNREFUSED", /连接失败或已中断/],
+    ["EHOSTUNREACH", /连接失败或已中断/],
+    ["ENETUNREACH", /连接失败或已中断/],
+    ["ENOTFOUND", /连接失败或已中断/],
+    ["EAI_AGAIN", /连接失败或已中断/],
+    ["CERT_HAS_EXPIRED", /证书校验失败/],
+    ["ERR_TLS_CERT_ALTNAME_INVALID", /证书校验失败/],
+    ["UNABLE_TO_VERIFY_LEAF_SIGNATURE", /证书校验失败/],
+    ["DEPTH_ZERO_SELF_SIGNED_CERT", /证书校验失败/],
+  ]) {
+    const results = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({
+        requestJson: async () => {
+          throw Object.assign(new Error(secret), { code, cause: new Error(token) });
+        },
+      }),
+    );
+    const failure = one(results, "dns.https");
+    assert.equal(failure.status, "failed");
+    assert.match(failure.message, message);
+    assert.deepEqual(failure.details, [`诊断代码：${code}`]);
+    safe(results);
+  }
+});
+
+test("the actual probe deadline and AbortError name produce only fixed timeout diagnostics", async () => {
+  for (const [requestJson, code] of [
+    [() => new Promise(() => {}), "SETUP_TIMEOUT"],
+    [
+      async () => {
+        throw Object.assign(new Error(secret), {
+          name: "AbortError",
+          code: "private-remote-output",
+        });
+      },
+      "ABORT_ERR",
+    ],
+  ]) {
+    const results = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({ timeoutMs: 10, requestJson }),
+    );
+    assert.match(one(results, "dns.https").message, /探测超时/);
+    assert.deepEqual(one(results, "dns.https").details, [`诊断代码：${code}`]);
+    safe(results);
+  }
+});
+
+test("unknown public probe errors never expose raw codes, names, messages or nested diagnostics", async () => {
+  const results = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      requestJson: async () => {
+        throw Object.assign(new Error(secret), {
+          code: "private-remote-output",
+          name: token,
+          cause: Object.assign(new Error(token), { code: "ECONNRESET" }),
+        });
+      },
+    }),
+  );
+  assert.equal(one(results, "dns.https").status, "failed");
+  assert.match(one(results, "dns.https").message, /原因尚未确定/);
+  assert.deepEqual(one(results, "dns.https").details, ["诊断代码：OTHER"]);
+  assert.doesNotMatch(one(results, "dns.https").message, /证书|超时/);
+  safe(results);
+});
+
 test("Codex execution denial is reported without exposing command output or suggesting ACL changes", async () => {
   for (const code of ["EACCES", "EPERM"]) {
     const result = await runSetupChecks(

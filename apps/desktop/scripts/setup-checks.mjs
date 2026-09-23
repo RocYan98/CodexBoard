@@ -15,6 +15,27 @@ import { readFrpcOrigin } from "./frpc-config.mjs";
 export const SETUP_SECTIONS = Object.freeze(["feishu", "web", "tunnel", "dns", "codex"]);
 const FEISHU_ENDPOINT = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal";
 const MAX_BYTES = 64 * 1024;
+const NETWORK_TIMEOUT_CODES = new Set(["SETUP_TIMEOUT", "ETIMEDOUT", "ABORT_ERR"]);
+const NETWORK_CERTIFICATE_CODES = new Set([
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "CERT_REVOKED",
+  "CERT_SIGNATURE_FAILURE",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+const NETWORK_CONNECTION_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+]);
 const execFile = promisify(execFileCallback);
 function timeoutError() {
   return Object.assign(new Error("Probe timed out"), { code: "SETUP_TIMEOUT" });
@@ -506,15 +527,23 @@ export async function runSetupChecks(input, options = {}) {
               : "TLS 证书有效，公网已返回健康的 CodexBoard 看板服务。",
           );
         }
-      } catch {
-        emit(
-          "dns.https",
-          `公网 ${protocolName}`,
-          "failed",
-          url.protocol === "http:"
-            ? "HTTP 公网连接失败，请检查公网 IP、remotePort、Caddy、隧道连接和后端状态。"
-            : "HTTPS 连接或证书验证失败，请检查域名解析、Caddy 证书、隧道连接和系统时间。",
-        );
+      } catch (error) {
+        let code = error?.name === "AbortError" ? "ABORT_ERR" : error?.code;
+        let message;
+        if (NETWORK_TIMEOUT_CODES.has(code))
+          message = `公网 ${protocolName} 探测超时，请检查网络、隧道连接和后端响应后重试。`;
+        else if (NETWORK_CERTIFICATE_CODES.has(code))
+          message = "HTTPS 证书校验失败，请检查域名、Caddy 证书和系统时间。";
+        else if (NETWORK_CONNECTION_CODES.has(code))
+          message =
+            url.protocol === "http:"
+              ? "HTTP 公网连接失败，请检查公网 IP、remotePort、隧道连接和后端状态。"
+              : "HTTPS 公网连接失败或已中断，请检查域名解析、隧道连接和网络后重试。";
+        else {
+          code = "OTHER";
+          message = `公网 ${protocolName} 探测失败，原因尚未确定，请稍后重试。`;
+        }
+        emit("dns.https", `公网 ${protocolName}`, "failed", message, [`诊断代码：${code}`]);
       }
     }
     if (section === "codex") {
