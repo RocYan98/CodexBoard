@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, isAbsolute, normalize, parse } from "node:path";
+import { posix, win32 } from "node:path";
 
 const LETTER_COUNT = 26n;
 const CHECKSUM_SPACE = LETTER_COUNT ** 5n;
@@ -7,12 +7,18 @@ const COLLISION_SPACE = 26 ** 3;
 const PROJECT_KEY_PATTERN = /^[A-Z]{1,5}$/;
 const RESERVED_PROJECT_KEYS = new Set(["TEMP"]);
 
+function pathSyntax(root: string) {
+  return /^[A-Za-z]:[\\/]|^\\\\/.test(root) ? win32 : posix;
+}
+
 function normalizedRoot(primaryRoot: string): string {
-  if (!primaryRoot || !isAbsolute(primaryRoot)) {
+  const syntax = pathSyntax(primaryRoot);
+  if (!primaryRoot || !syntax.isAbsolute(primaryRoot)) {
     throw new Error("项目根目录必须是绝对路径");
   }
-  const normalized = normalize(primaryRoot.normalize("NFC"));
-  const filesystemRoot = parse(normalized).root;
+  const native = syntax.normalize(primaryRoot.normalize("NFC"));
+  const normalized = syntax === win32 ? native.toLowerCase() : native;
+  const filesystemRoot = syntax.parse(normalized).root;
   return normalized.length > filesystemRoot.length
     ? normalized.replace(/[\\/]+$/u, "")
     : normalized;
@@ -29,7 +35,8 @@ function checksumLetters(input: string): string {
 }
 
 function readablePrefix(root: string, checksum: string): string {
-  const basenameLetters = basename(root)
+  const basenameLetters = pathSyntax(root)
+    .basename(root)
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/gu, "")
     .replace(/[^A-Za-z]/gu, "")

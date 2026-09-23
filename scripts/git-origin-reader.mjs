@@ -3,7 +3,7 @@ import { readdir, stat, realpath } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
@@ -12,7 +12,7 @@ const cache = new Map();
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 
 // Deliberately accepts only literal shell words. Never evaluate shell text, substitutions or scripts.
-function shellCommands(text) {
+function shellCommands(text, windowsShell = false) {
   const commands = [];
   let words = [],
     word = "",
@@ -24,11 +24,12 @@ function shellCommands(text) {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === "`" || c === "$" || c === "<" || c === ">") return [];
-    if (c === "\\" && quote !== "'") {
+    if (c === "\\" && quote !== "'" && !windowsShell) {
       word += text[++i] ?? "";
       continue;
     }
     if (quote) {
+      if (windowsShell && c === quote && text[i + 1] === quote) return [];
       if (c === quote) quote = null;
       else word += c;
       continue;
@@ -37,6 +38,7 @@ function shellCommands(text) {
       quote = c;
       continue;
     }
+    if (windowsShell && [";", "\n", "&"].includes(c)) return [];
     if (c === ";" || c === "\n" || c === "&") {
       flush();
       if (words.length) commands.push(words);
@@ -63,8 +65,24 @@ function creations(item) {
   if (!isAbsolute(cwd)) return [];
   const command = item.command;
   if (!Array.isArray(command)) return [];
-  const shell = ["sh", "bash", "zsh"].includes(basename(command[0] ?? ""));
-  const groups = shell ? shellCommands(command.at(-1) ?? "") : [command];
+  const commandName = (value) => value.split(/[\\/]/).at(-1).toLowerCase();
+  const program = commandName(command[0] ?? "");
+  const windowsShell = ["powershell", "powershell.exe", "pwsh", "pwsh.exe"].includes(program);
+  if (windowsShell) {
+    const flag = command.at(-2)?.toLowerCase();
+    if (!["-command", "-c"].includes(flag)) return [];
+    if (
+      command
+        .slice(1, -2)
+        .some((arg) => !["-noprofile", "-nologo", "-noninteractive"].includes(arg.toLowerCase()))
+    )
+      return [];
+  }
+  const shell = windowsShell || ["sh", "bash", "zsh"].includes(program);
+  const groups = shell ? shellCommands(command.at(-1) ?? "", windowsShell) : [command];
+  // PowerShell's final exit status cannot prove earlier statements succeeded.
+  // Attribute a single literal native Git invocation; complex scripts stay unknown.
+  if (windowsShell && groups.length !== 1) return [];
   const result = [];
   for (const group of groups) {
     if (group[0] === "cd" && group.length === 2) {
@@ -72,7 +90,7 @@ function creations(item) {
       continue;
     }
     const args = [...group];
-    if (basename(args.shift() ?? "") !== "git") continue;
+    if (!["git", "git.exe"].includes(commandName(args.shift() ?? ""))) continue;
     let directory = cwd;
     if (args[0] === "-C" && args[1]) {
       directory = resolve(cwd, args[1]);

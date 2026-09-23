@@ -1,3 +1,5 @@
+import { makePublicReadableSync } from "../../../scripts/test-support/private-access.mjs";
+import { ensurePrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -176,7 +178,7 @@ describe("loadConfig", () => {
     const directory = mkdtempSync(join(tmpdir(), "codexboard-codex-token-"));
     const tokenFile = join(directory, "codex-token");
     try {
-      writeFileSync(tokenFile, "capability-token\n", { mode: 0o600 });
+      writePrivateFixture(tokenFile, "capability-token\n", { mode: 0o600 });
       expect(
         loadConfig({
           CODEXBOARD_CODEX_TRANSPORT: "websocket",
@@ -221,7 +223,7 @@ describe("loadConfig", () => {
 
       const symlink = join(directory, "codex-token-link");
       mkdirSync(join(directory, "nested"));
-      writeFileSync(join(directory, "nested", "wide-token"), "wide", { mode: 0o644 });
+      writePrivateFixture(join(directory, "nested", "wide-token"), "wide", { mode: 0o644 });
       symlinkSync(tokenFile, symlink);
       if (existsSync(symlink)) {
         expect(() =>
@@ -248,8 +250,8 @@ describe("loadConfig", () => {
     const secretFile = join(directory, "feishu-secret");
     const codexTokenFile = join(directory, "codex-token");
     try {
-      writeFileSync(secretFile, "secret-from-file\n", { mode: 0o600 });
-      writeFileSync(codexTokenFile, "codex-token-from-file\n", { mode: 0o600 });
+      writePrivateFixture(secretFile, "secret-from-file\n", { mode: 0o600 });
+      writePrivateFixture(codexTokenFile, "codex-token-from-file\n", { mode: 0o600 });
       let error: unknown;
       try {
         loadConfig({
@@ -280,7 +282,7 @@ describe("loadConfig", () => {
 describe("embedded desktop bridge configuration", () => {
   const directory = mkdtempSync(join(tmpdir(), "embedded-config-"));
   const tokenFile = join(directory, "token");
-  writeFileSync(tokenFile, "test-token", { mode: 0o600 });
+  writePrivateFixture(tokenFile, "test-token", { mode: 0o600 });
   afterAll(() => rmSync(directory, { recursive: true, force: true }));
   const embedded = {
     CODEXBOARD_CODEX_TRANSPORT: "embedded",
@@ -291,9 +293,9 @@ describe("embedded desktop bridge configuration", () => {
   it("accepts embedded mode with production Feishu security settings", () => {
     const webRoot = join(directory, "production-web");
     mkdirSync(webRoot);
-    writeFileSync(join(webRoot, "index.html"), "<html></html>");
+    writePrivateFixture(join(webRoot, "index.html"), "<html></html>");
     const secretFile = join(directory, "feishu-secret");
-    writeFileSync(secretFile, "test-secret", { mode: 0o600 });
+    writePrivateFixture(secretFile, "test-secret", { mode: 0o600 });
     const config = loadConfig({
       ...embedded,
       CODEXBOARD_ENV: "production",
@@ -339,20 +341,20 @@ describe("unified Feishu credentials configuration", () => {
   const directory = mkdtempSync(join(tmpdir(), "feishu-credentials-config-"));
   afterAll(() => rmSync(directory, { recursive: true, force: true }));
   const credentialsFile = join(directory, "feishu.json");
-  writeFileSync(
+  writePrivateFixture(
     credentialsFile,
     JSON.stringify({ appId: "cli_credentials123", appSecret: "private-test-secret" }),
     { mode: 0o600 },
   );
   const legacySecretFile = join(directory, "legacy-secret");
-  writeFileSync(legacySecretFile, "other-secret", { mode: 0o600 });
+  writePrivateFixture(legacySecretFile, "other-secret", { mode: 0o600 });
 
   it("loads both credentials from one private file in production Feishu mode", () => {
     const webRoot = join(directory, "web");
     mkdirSync(webRoot);
-    writeFileSync(join(webRoot, "index.html"), "<html></html>");
+    writePrivateFixture(join(webRoot, "index.html"), "<html></html>");
     const tokenFile = join(directory, "token");
-    writeFileSync(tokenFile, "test-token", { mode: 0o600 });
+    writePrivateFixture(tokenFile, "test-token", { mode: 0o600 });
 
     const config = loadConfig({
       CODEXBOARD_ENV: "production",
@@ -386,7 +388,7 @@ describe("unified Feishu credentials configuration", () => {
     const symlink = join(directory, "credentials-link");
     symlinkSync(credentialsFile, symlink);
     const publicFile = join(directory, "public.json");
-    writeFileSync(publicFile, '{"appId":"cli_test","appSecret":"secret"}', { mode: 0o644 });
+    writePrivateFixture(publicFile, '{"appId":"cli_test","appSecret":"secret"}', { mode: 0o644 });
 
     for (const path of [
       "relative.json",
@@ -409,7 +411,7 @@ describe("unified Feishu credentials configuration", () => {
     "null",
   ])("rejects invalid credentials without echoing their contents (%#)", (contents) => {
     const path = join(directory, "invalid.json");
-    writeFileSync(path, contents, { mode: 0o600 });
+    writePrivateFixture(path, contents, { mode: 0o600 });
     let caught: unknown;
     try {
       loadConfig({ CODEXBOARD_FEISHU_CREDENTIALS_FILE: path });
@@ -420,3 +422,12 @@ describe("unified Feishu credentials configuration", () => {
     expect(JSON.stringify((caught as ConfigError).issues)).not.toContain("sensitive-parse-test");
   });
 });
+
+function writePrivateFixture(...args: Parameters<typeof writeFileSync>): void {
+  writeFileSync(...args);
+  const options = args[2];
+  if (options && typeof options === "object") {
+    if (options.mode === 0o600 || options.mode === 0o644) ensurePrivateFileSync(String(args[0]));
+    if (options.mode === 0o644) makePublicReadableSync(String(args[0]));
+  }
+}

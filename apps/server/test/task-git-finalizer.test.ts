@@ -94,7 +94,7 @@ it("rejects a stale worktree registration even when its directory is gone", asyn
   git(main, "worktree", "add", "-b", "feature/task", worktree);
   rmSync(worktree, { recursive: true });
   await expect(check(worktree, "feature/task")).rejects.toThrow("仍登记在 Git");
-  expect(git(main, "worktree", "list", "--porcelain")).toContain(worktree);
+  expect(git(main, "worktree", "list", "--porcelain")).toContain(worktree.replaceAll("\\", "/"));
 });
 
 it("does not require a merge commit or a delivery receipt after external deletion", async () => {

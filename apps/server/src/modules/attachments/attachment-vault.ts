@@ -1,8 +1,10 @@
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../../../scripts/private-file-permissions.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   renameSync,
   rmdirSync,
@@ -56,8 +58,7 @@ export class AttachmentVault {
   constructor(options: AttachmentVaultOptions) {
     this.#rootDirectory = resolve(options.rootDirectory);
     this.#maxBytes = options.maxBytes ?? 25 * 1024 * 1024;
-    mkdirSync(this.#rootDirectory, { recursive: true, mode: 0o700 });
-    chmodSync(this.#rootDirectory, 0o700);
+    ensurePrivateDirectorySync(this.#rootDirectory);
   }
 
   store(upload: AttachmentUpload): StoredAttachment {
@@ -75,14 +76,13 @@ export class AttachmentVault {
     const storageKey = `${id.slice(0, 2)}/${id}`;
     const finalPath = this.#path(storageKey);
     const directory = dirname(finalPath);
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    chmodSync(directory, 0o700);
+    ensurePrivateDirectorySync(directory);
     const temporaryPath = join(directory, `.${id}.${process.pid}.tmp`);
 
     try {
       writeFileSync(temporaryPath, upload.bytes, { flag: "wx", mode: 0o600 });
+      ensurePrivateFileSync(temporaryPath);
       renameSync(temporaryPath, finalPath);
-      chmodSync(finalPath, 0o600);
     } catch (cause: unknown) {
       if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
       throw new AppError("INTERNAL_ERROR", 500, "附件保存失败", { cause });
@@ -135,7 +135,7 @@ export class AttachmentVault {
           for (const created of missingDirectories(directory, quarantineRoot)) {
             createdDirectories.add(created);
           }
-          mkdirSync(directory, { recursive: true, mode: 0o700 });
+          ensurePrivateDirectorySync(directory);
           renameSync(entry.sourcePath, entry.quarantinePath);
           moved.push(entry);
           available.push(entry);
@@ -145,7 +145,7 @@ export class AttachmentVault {
       }
     } catch (cause: unknown) {
       for (const entry of moved.reverse()) {
-        mkdirSync(dirname(entry.sourcePath), { recursive: true, mode: 0o700 });
+        ensurePrivateDirectorySync(dirname(entry.sourcePath));
         renameSync(entry.quarantinePath, entry.sourcePath);
       }
       for (const directory of [...createdDirectories].sort(
@@ -171,7 +171,7 @@ export class AttachmentVault {
     try {
       for (const entry of batch.entries) {
         const destination = this.#path(entry.storageKey);
-        mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+        ensurePrivateDirectorySync(dirname(destination));
         if (existsSync(entry.quarantinePath)) renameSync(entry.quarantinePath, destination);
       }
       this.#removeQuarantineDirectory(batch.id);

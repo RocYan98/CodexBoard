@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::{
     io::{Read, Write},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{atomic::Ordering, Mutex},
     time::{Duration, Instant},
 };
@@ -39,7 +39,7 @@ fn run(app: &tauri::AppHandle, action: &str, options: Value) -> Result<Value, St
         }
     }
     let _lease = MaintenanceLease(&controller);
-    let home = PathBuf::from(std::env::var_os("HOME").ok_or("无法定位当前用户目录")?);
+    let home = PathBuf::from(crate::user_home().ok_or("无法定位当前用户目录")?);
     let app_data = crate::app_data::path(&home);
     let runtime = app
         .path()
@@ -47,20 +47,23 @@ fn run(app: &tauri::AppHandle, action: &str, options: Value) -> Result<Value, St
         .map_err(|_| "无法定位应用资源")?
         .join("runtime");
     let executable = tauri::process::current_binary(&app.env()).map_err(|_| "无法定位当前应用")?;
-    let mut child = Command::new(runtime.join("bin/node"))
-        .arg(runtime.join("desktop/skill-manager.mjs"))
-        .arg(action)
-        .arg(&runtime)
-        .arg(&app_data)
-        .arg(&home)
-        .arg(executable)
-        .env_remove("NODE_OPTIONS")
-        .env_remove("NODE_PATH")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| "随包 Skill 管理工具不可用，请重新安装应用。")?;
+    let mut child = crate::node_command::command(
+        crate::node_path(&runtime),
+        runtime.join("desktop/skill-manager.mjs"),
+    )
+    .map_err(|_| "随包 Skill 管理工具不可用，请重新安装应用。")?
+    .arg(action)
+    .arg(&runtime)
+    .arg(&app_data)
+    .arg(&home)
+    .arg(executable)
+    .env_remove("NODE_OPTIONS")
+    .env_remove("NODE_PATH")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()
+    .map_err(|_| "随包 Skill 管理工具不可用，请重新安装应用。")?;
     if let Some(mut input) = child.stdin.take() {
         if writeln!(input, "{options}").is_err() {
             let _ = child.kill();
@@ -158,7 +161,7 @@ pub fn handle_commit_cli() -> Option<i32> {
         if args.len() != 6 {
             return Err("invalid arguments");
         }
-        let home = PathBuf::from(std::env::var_os("HOME").ok_or("missing HOME")?);
+        let home = PathBuf::from(crate::user_home().ok_or("missing user home")?);
         let expected = if args[4] == "-" && args[5] == "-" {
             None
         } else {

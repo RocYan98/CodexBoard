@@ -1,20 +1,26 @@
 import { execFile } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { connectDesktopSession } from "./codex-desktop-session.mjs";
+import { windowsOpenArguments } from "./codex-windows-app.mjs";
 
 function unavailable(message) {
   return Object.assign(new Error(message), { rpcError: { code: -32001, message } });
 }
 
-export async function openDesktopThread(threadId, { signal, timeoutMs = 2000 } = {}) {
+export async function openDesktopThread(
+  threadId,
+  { signal, timeoutMs = 2000, platform = process.platform, execute = execFile } = {},
+) {
   if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(threadId))
     throw unavailable("Codex 对话编号无效");
-  if (process.platform !== "darwin") throw unavailable("自动加载 Codex 桌面对话需要 macOS");
+  if (!["darwin", "win32"].includes(platform))
+    throw unavailable("当前系统不支持自动加载 Codex 桌面对话");
+  const target = `codex://threads/${threadId}`;
   await new Promise((resolve, reject) => {
-    execFile(
-      "/usr/bin/open",
-      [`codex://threads/${threadId}`],
-      { signal, timeout: timeoutMs },
+    execute(
+      platform === "win32" ? "powershell.exe" : "/usr/bin/open",
+      platform === "win32" ? windowsOpenArguments(target) : [target],
+      { signal, timeout: timeoutMs, windowsHide: true },
       (error) => {
         if (error) reject(unavailable("无法打开 Codex 桌面对话"));
         else resolve();

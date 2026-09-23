@@ -1,4 +1,13 @@
-import test from "node:test";
+import { test as platformTest } from "node:test";
+const test = (name, fn) =>
+  platformTest(
+    `macOS shell wrapper: ${name}`,
+    {
+      skip:
+        process.platform !== "darwin" ? "Windows uses taskctl.ps1/.cmd with separate tests" : false,
+    },
+    fn,
+  );
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

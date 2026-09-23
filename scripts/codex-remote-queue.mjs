@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync, lstatSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 const queueOperations = new Map();
 export const queueToken = (messages) =>
@@ -66,10 +66,10 @@ export function queuedContent(message, codexHome) {
     const root = join(codexHome, "taskboard", "remote-uploads");
     let ownerKey;
     const files = lines.map((line) => {
-      const start = line.lastIndexOf(`: ${root}/`);
+      const start = line.lastIndexOf(`: ${root}${sep}`);
       if (start < 0) throw new Error();
       const path = line.slice(start + 2);
-      const parts = relative(root, path).split("/");
+      const parts = relative(root, path).split(sep);
       if (
         parts.length !== 3 ||
         !/^[a-f0-9]{64}$/.test(parts[0]) ||

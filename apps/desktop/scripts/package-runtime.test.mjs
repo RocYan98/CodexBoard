@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -41,6 +41,7 @@ function filesUnder(directory) {
 // Parse actual imports, exports, dynamic imports and URL-based runtime paths,
 // avoiding false dependencies from comments or string content.
 function localReferences(file) {
+  const imports = JSON.parse(readFileSync(join(project, "package.json"), "utf8")).imports || {};
   const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
   const references = [];
   function visit(node) {
@@ -55,8 +56,10 @@ function localReferences(file) {
       node.expression.text === "URL"
     )
       specifier = node.arguments?.[0];
-    if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("."))
-      references.push(resolve(dirname(file), specifier.text));
+    if (specifier && ts.isStringLiteral(specifier)) {
+      if (specifier.text.startsWith(".")) references.push(resolve(dirname(file), specifier.text));
+      else if (imports[specifier.text]) references.push(resolve(project, imports[specifier.text]));
+    }
     ts.forEachChild(node, visit);
   }
   visit(source);
@@ -84,10 +87,6 @@ test("packaged scripts cover native/backend runtime references without developme
     .flatMap(localReferences)
     .filter((file) => file.startsWith(join(project, "scripts/")));
   assert.ok(bridgeRoots.length > 0, "Backend bridge runtime paths must be checked");
-  assert.deepEqual(
-    dependencyClosure(bridgeRoots).map((file) => relative(join(project, "scripts"), file)),
-    [...RUNTIME_SCRIPT_FILES].sort(),
-  );
 
   const nativeSource = filesUnder(join(project, "apps/desktop/src-tauri/src"))
     .filter((file) => file.endsWith(".rs"))
@@ -97,10 +96,19 @@ test("packaged scripts cover native/backend runtime references without developme
     (match) => join(project, "apps/desktop/scripts", match[1]),
   );
   assert.ok(desktopRoots.length > 0, "Native runtime script paths must be checked");
+  const closure = dependencyClosure([...bridgeRoots, ...desktopRoots]);
   assert.deepEqual(
-    dependencyClosure(desktopRoots).map((file) =>
-      relative(join(project, "apps/desktop/scripts"), file),
-    ),
+    closure
+      .filter((file) => file.startsWith(join(project, "scripts")))
+      .map((file) => relative(join(project, "scripts"), file))
+      .sort(),
+    [...RUNTIME_SCRIPT_FILES].sort(),
+  );
+  assert.deepEqual(
+    closure
+      .filter((file) => file.startsWith(join(project, "apps/desktop/scripts")))
+      .map((file) => relative(join(project, "apps/desktop/scripts"), file))
+      .sort(),
     [...DESKTOP_RUNTIME_SCRIPT_FILES].sort(),
   );
 
@@ -111,7 +119,7 @@ test("packaged scripts cover native/backend runtime references without developme
   );
   for (const path of filesUnder(runtime)) {
     assert.doesNotMatch(path, /(?:fake-|run-e2e|check-codex-protocol|\.test\.mjs|build-macos)/);
-    const [category, file] = relative(runtime, path).split("/");
+    const [category, file] = relative(runtime, path).split(sep);
     const directory = category === "desktop" ? "apps/desktop/scripts" : "scripts";
     assert.deepEqual(readFileSync(path), readFileSync(join(project, directory, file)));
   }
@@ -147,7 +155,7 @@ function dependencyFixture(t) {
   mkdirSync(join(fixture, "node_modules/@codexboard"), { recursive: true });
   for (const workspace of workspaces) {
     const path = `node_modules/${packages[workspace].name}`;
-    symlinkSync(join(fixture, workspace), join(fixture, path));
+    symlinkSync(join(fixture, workspace), join(fixture, path), "junction");
     packages[path] = { resolved: workspace, link: true };
   }
   for (const name of ["smol-toml", "zod", "better-sqlite3", "react", "mermaid", "typescript"])
@@ -181,7 +189,10 @@ test("npm selects server/CLI/root dependencies and copied packages retain nested
   writeFileSync(join(stale, "package.json"), "{}");
   const sqlite = join(fixture, "node_modules/better-sqlite3");
   mkdirSync(join(sqlite, "prebuilds"));
-  writeFileSync(join(sqlite, "prebuilds/darwin-arm64.node"), "native binary");
+  writeFileSync(
+    join(sqlite, `prebuilds/${process.platform}-${process.arch}.node`),
+    "native binary",
+  );
   mkdirSync(join(sqlite, "build"));
   writeFileSync(join(sqlite, "build/config.gypi"), "local compiler paths");
   mkdirSync(join(fixture, "node_modules/fastify/build"));
@@ -190,7 +201,13 @@ test("npm selects server/CLI/root dependencies and copied packages retain nested
   assert.equal(existsSync(join(runtime, "node_modules/better-sqlite3/build")), false);
   assert.equal(existsSync(join(sqlite, "build/config.gypi")), true);
   assert.equal(
-    readFileSync(join(runtime, "node_modules/better-sqlite3/prebuilds/darwin-arm64.node"), "utf8"),
+    readFileSync(
+      join(
+        runtime,
+        `node_modules/better-sqlite3/prebuilds/${process.platform}-${process.arch}.node`,
+      ),
+      "utf8",
+    ),
     "native binary",
   );
   assert.equal(
@@ -213,7 +230,7 @@ test("npm selects server/CLI/root dependencies and copied packages retain nested
 test("npm dependency paths remain relative to a symlinked project root", (t) => {
   const fixture = dependencyFixture(t);
   const projectLink = join(temporaryDirectory(t), "project-link");
-  symlinkSync(fixture, projectLink);
+  symlinkSync(fixture, projectLink, "junction");
   assert.deepEqual(listRuntimeDependencyPaths(projectLink), listRuntimeDependencyPaths(fixture));
 });
 
@@ -259,7 +276,7 @@ test("release dist removes debug output while preserving executable modules and 
 
   assert.deepEqual(
     filesUnder(destination)
-      .map((file) => relative(destination, file))
+      .map((file) => relative(destination, file).split(sep).join("/"))
       .sort(),
     [
       "LICENSE",

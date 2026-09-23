@@ -22,6 +22,7 @@ import { ExecutionQueue } from "../src/modules/execution/index.js";
 import { Taskboard, TaskWorkspace } from "../src/modules/taskboard/index.js";
 import { TaskLifecycleService } from "../src/modules/taskboard/task-lifecycle-service.js";
 import { TaskGitFinalizer } from "../src/modules/taskboard/task-git-finalizer.js";
+import { canonicalWorkspace } from "../src/modules/taskboard/task-lifecycle-guard.js";
 
 const databases: SqliteDatabase[] = [];
 const roots: string[] = [];
@@ -263,9 +264,10 @@ it("rejects terminal operations on an archived project", () => {
 
 it("blocks restoring another completed task while its workspace is being finalized", () => {
   const { database, task, taskboard } = setup();
+  const workspace = canonicalWorkspace(tmpdir());
   database
-    .prepare("UPDATE projects SET workspace_realpath = '/tmp' WHERE id = ?")
-    .run(task.projectId);
+    .prepare("UPDATE projects SET workspace_realpath = ? WHERE id = ?")
+    .run(workspace, task.projectId);
   const completed = taskboard.moveTask(
     task.id,
     { expectedVersion: task.version, targetStatus: "done" },
@@ -284,10 +286,8 @@ it("blocks restoring another completed task while its workspace is being finaliz
       new Date().toISOString(),
     );
   database
-    .prepare(
-      "INSERT INTO task_lifecycle_resources (resource_key, operation_id) VALUES ('cwd:/private/tmp', ?)",
-    )
-    .run(opId);
+    .prepare("INSERT INTO task_lifecycle_resources (resource_key, operation_id) VALUES (?, ?)")
+    .run(`cwd:${workspace}`, opId);
   expect(() =>
     taskboard.moveTask(
       task.id,

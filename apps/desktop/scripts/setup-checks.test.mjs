@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { createServer } from "node:http";
 import { requestJson, runSetupChecks } from "./setup-checks.mjs";
+import { assertPrivateFileSync } from "#private-file-permissions";
 
 const secret = "synthetic-app-secret-never-display";
 const token = "synthetic-frpc-token-never-display";
@@ -47,6 +49,7 @@ const health = {
 function deps(overrides = {}) {
   return {
     timeoutMs: 1000,
+    publicTimeoutMs: 1000,
     requestJson: async (url) => ({
       status: 200,
       body: url.includes("open.feishu.cn")
@@ -74,6 +77,22 @@ function safe(results) {
   const text = JSON.stringify(results);
   for (const value of [secret, token, "discarded-app-token", "private-remote-output"])
     assert.equal(text.includes(value), false);
+}
+
+async function localHealthServer(t, respond) {
+  const server = createServer(respond);
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(resolve);
+      }),
+  );
+  return { server, url: `http://127.0.0.1:${server.address().port}/api/health` };
 }
 
 test("requestJson uses plain HTTP for an HTTP URL", async () => {
@@ -185,7 +204,8 @@ test("tunnel verify uses a private temporary file, cleans it, and probes only ne
         assert.deepEqual(args.slice(0, 2), ["verify", "-c"]);
         file = args[2];
         assert.equal(readFileSync(file, "utf8"), frpc);
-        assert.equal(statSync(file).mode & 0o777, 0o600);
+        assertPrivateFileSync(file);
+        if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
         assert.ok(options.timeout > 0);
         assert.ok(options.maxBuffer > 0);
         return { stdout: `${secret} ${token}`, stderr: "" };
@@ -306,7 +326,14 @@ test("omitted frpc serverPort defaults to 7000 and DNS/TCP failures stay actiona
 });
 
 test("DNS reports A/AAAA/CNAME and accepts an ingress address different from the FRP server", async () => {
-  const result = await runSetupChecks({ ...input, section: "dns" }, deps());
+  const result = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      lookup: async () => {
+        assert.fail("Valid direct DNS records must not require a system lookup");
+      },
+    }),
+  );
   assert.equal(one(result, "dns.records").status, "passed");
   assert.deepEqual(one(result, "dns.records").details, [
     "A：203.0.113.20",
@@ -314,6 +341,204 @@ test("DNS reports A/AAAA/CNAME and accepts an ingress address different from the
     "CNAME：gateway.example.test",
   ]);
   assert.equal(one(result, "dns.https").status, "passed");
+});
+
+test("public health has an independent 10-second default and cap while commands keep their budget", async () => {
+  for (const [publicTimeoutMs, expected] of [
+    [undefined, 10_000],
+    [60_000, 10_000],
+    [250, 250],
+  ]) {
+    const results = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({
+        timeoutMs: 10,
+        publicTimeoutMs,
+        requestJson: async (_url, options) => {
+          assert.equal(options.timeoutMs, expected);
+          return { status: 200, body: health };
+        },
+      }),
+    );
+    assert.equal(one(results, "dns.https").status, "passed");
+  }
+  const budgets = [];
+  for (const section of ["feishu", "codex"])
+    await runSetupChecks(
+      { ...input, section },
+      deps({
+        timeoutMs: undefined,
+        publicTimeoutMs: 10_000,
+        requestJson: async (_url, options) => {
+          budgets.push(options.timeoutMs);
+          return { status: 200, body: { code: 0, app_access_token: "discarded-app-token" } };
+        },
+        execFile: async (_path, _args, options) => {
+          budgets.push(options.timeout);
+          return { stdout: "Logged in using ChatGPT" };
+        },
+      }),
+    );
+  assert.deepEqual(budgets, [3500, 3500]);
+});
+
+test("a real public health response can arrive after the general probe budget", async (t) => {
+  let timer;
+  t.after(() => clearTimeout(timer));
+  const endpoint = await localHealthServer(t, (_request, response) => {
+    timer = setTimeout(() => response.end(JSON.stringify(health)), 40);
+    response.once("close", () => clearTimeout(timer));
+  });
+  const results = await runSetupChecks(
+    { ...input, section: "dns", frpc: tcpFrpc },
+    deps({
+      timeoutMs: 10,
+      publicTimeoutMs: 2000,
+      requestJson: (_url, options) => {
+        assert.equal(options.timeoutMs, 2000);
+        return requestJson(endpoint.url, options);
+      },
+    }),
+  );
+  assert.equal(one(results, "dns.https").status, "passed");
+});
+
+test(
+  "public health deadline aborts and releases a real pending HTTP connection",
+  { timeout: 5000 },
+  async (t) => {
+    const endpoint = await localHealthServer(t, () => {});
+    let connected = false;
+    const connectionClosed = new Promise((resolve) => {
+      endpoint.server.once("connection", (socket) => {
+        connected = true;
+        socket.once("close", resolve);
+      });
+    });
+    let signal;
+    const results = await runSetupChecks(
+      { ...input, section: "dns", frpc: tcpFrpc },
+      deps({
+        timeoutMs: 10,
+        publicTimeoutMs: 1000,
+        requestJson: (_url, options) => {
+          assert.equal(options.timeoutMs, 1000);
+          signal = options.signal;
+          return requestJson(endpoint.url, options);
+        },
+      }),
+    );
+    assert.equal(one(results, "dns.https").status, "failed");
+    assert.deepEqual(one(results, "dns.https").details, ["诊断代码：SETUP_TIMEOUT"]);
+    assert.equal(signal.aborted, true);
+    assert.equal(connected, true, "The pending HTTP probe must establish a real connection");
+    await connectionClosed;
+  },
+);
+
+test("a longer public health deadline does not extend DNS queries", async () => {
+  const results = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      timeoutMs: 10,
+      publicTimeoutMs: 250,
+      resolve4: () => new Promise((resolve) => setTimeout(() => resolve(["203.0.113.20"]), 40)),
+      resolve6: async () => [],
+      resolveCname: async () => [],
+      lookup: async () => [],
+    }),
+  );
+  assert.equal(one(results, "dns.records").status, "failed");
+  assert.equal(one(results, "dns.https").status, "passed");
+});
+
+test("direct DNS timeout falls back to bounded system resolution without claiming verified records", async () => {
+  const calls = [];
+  const result = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      timeoutMs: 10,
+      resolve4: () => new Promise(() => {}),
+      resolve6: () => new Promise(() => {}),
+      resolveCname: () => new Promise(() => {}),
+      lookup: async (...args) => {
+        calls.push(args);
+        return [
+          { address: "203.0.113.20", family: 4 },
+          { address: "2001:db8::20", family: 6 },
+          { address: "private-remote-output", family: 4 },
+          { address: "203.0.113.21", family: 6 },
+        ];
+      },
+      requestJson: async () => {
+        throw new Error("private-remote-output");
+      },
+    }),
+  );
+  assert.deepEqual(calls, [["tasks.example.test", { all: true }]]);
+  assert.equal(one(result, "dns.records").status, "passed");
+  assert.match(one(result, "dns.records").message, /系统域名解析可用.*直接 DNS 记录查询不可用/);
+  assert.match(one(result, "dns.records").message, /尚未核验公网 DNS 记录/);
+  assert.deepEqual(one(result, "dns.records").details, [
+    "系统 IPv4：203.0.113.20",
+    "系统 IPv6：2001:db8::20",
+  ]);
+  assert.equal(one(result, "dns.https").status, "failed");
+  safe(result);
+});
+
+test("CNAME alone and invalid system addresses cannot pass even when HTTPS is healthy", async () => {
+  for (const values of [
+    [],
+    [
+      null,
+      { address: "private-remote-output", family: 4 },
+      { address: "203.0.113.20", family: 6 },
+      { address: "2001:db8::20", family: "6" },
+    ],
+  ]) {
+    const result = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({
+        resolve4: async () => [],
+        resolve6: async () => [],
+        lookup: async () => values,
+      }),
+    );
+    assert.equal(one(result, "dns.records").status, "failed");
+    assert.match(one(result, "dns.records").message, /未得到可用的 IP 地址/);
+    assert.deepEqual(one(result, "dns.records").details, ["CNAME：gateway.example.test"]);
+    assert.equal(one(result, "dns.https").status, "passed");
+    safe(result);
+  }
+});
+
+test("system lookup errors and timeouts remain distinct from a negative DNS answer", async () => {
+  const unavailable = async () => {
+    throw Object.assign(new Error("private-remote-output"), { code: "ETIMEOUT" });
+  };
+  for (const lookup of [unavailable, () => new Promise(() => {})]) {
+    const result = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({ timeoutMs: 10, resolve4: unavailable, resolve6: unavailable, lookup }),
+    );
+    assert.equal(one(result, "dns.records").status, "failed");
+    assert.match(one(result, "dns.records").message, /均不可用.*无法确认/);
+    safe(result);
+  }
+  const result = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      resolve4: unavailable,
+      resolve6: unavailable,
+      lookup: async () => {
+        throw Object.assign(new Error("private-remote-output"), { code: "ENOTFOUND" });
+      },
+    }),
+  );
+  assert.equal(one(result, "dns.records").status, "failed");
+  assert.match(one(result, "dns.records").message, /未得到可用的 IP 地址/);
+  safe(result);
 });
 
 test("public IPv4 TCP ingress skips DNS and checks the explicit HTTP remote port", async () => {
@@ -368,12 +593,111 @@ test("missing DNS and HTTPS network/TLS errors do not pass or leak", async () =>
       resolve4: fail,
       resolve6: fail,
       resolveCname: fail,
+      lookup: fail,
       requestJson: fail,
     }),
   );
   assert.equal(one(result, "dns.records").status, "failed");
   assert.equal(one(result, "dns.https").status, "failed");
   safe(result);
+});
+
+test("public probe failures distinguish timeout, connection and certificate codes without native output", async () => {
+  for (const [code, message] of [
+    ["SETUP_TIMEOUT", /探测超时/],
+    ["ETIMEDOUT", /探测超时/],
+    ["ABORT_ERR", /探测超时/],
+    ["ECONNRESET", /连接失败或已中断/],
+    ["ECONNREFUSED", /连接失败或已中断/],
+    ["EHOSTUNREACH", /连接失败或已中断/],
+    ["ENETUNREACH", /连接失败或已中断/],
+    ["ENOTFOUND", /连接失败或已中断/],
+    ["EAI_AGAIN", /连接失败或已中断/],
+    ["CERT_HAS_EXPIRED", /证书校验失败/],
+    ["ERR_TLS_CERT_ALTNAME_INVALID", /证书校验失败/],
+    ["UNABLE_TO_VERIFY_LEAF_SIGNATURE", /证书校验失败/],
+    ["DEPTH_ZERO_SELF_SIGNED_CERT", /证书校验失败/],
+  ]) {
+    const results = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({
+        timeoutMs: 10,
+        publicTimeoutMs: 250,
+        requestJson: async () => {
+          throw Object.assign(new Error(secret), { code, cause: new Error(token) });
+        },
+      }),
+    );
+    const failure = one(results, "dns.https");
+    assert.equal(failure.status, "failed");
+    assert.match(failure.message, message);
+    assert.deepEqual(failure.details, [`诊断代码：${code}`]);
+    safe(results);
+  }
+});
+
+test("the actual probe deadline and AbortError name produce only fixed timeout diagnostics", async () => {
+  for (const [requestJson, code] of [
+    [() => new Promise(() => {}), "SETUP_TIMEOUT"],
+    [
+      async () => {
+        throw Object.assign(new Error(secret), {
+          name: "AbortError",
+          code: "private-remote-output",
+        });
+      },
+      "ABORT_ERR",
+    ],
+  ]) {
+    const results = await runSetupChecks(
+      { ...input, section: "dns" },
+      deps({ timeoutMs: 10, publicTimeoutMs: 10, requestJson }),
+    );
+    assert.match(one(results, "dns.https").message, /探测超时/);
+    assert.deepEqual(one(results, "dns.https").details, [`诊断代码：${code}`]);
+    safe(results);
+  }
+});
+
+test("unknown public probe errors never expose raw codes, names, messages or nested diagnostics", async () => {
+  const results = await runSetupChecks(
+    { ...input, section: "dns" },
+    deps({
+      requestJson: async () => {
+        throw Object.assign(new Error(secret), {
+          code: "private-remote-output",
+          name: token,
+          cause: Object.assign(new Error(token), { code: "ECONNRESET" }),
+        });
+      },
+    }),
+  );
+  assert.equal(one(results, "dns.https").status, "failed");
+  assert.match(one(results, "dns.https").message, /原因尚未确定/);
+  assert.deepEqual(one(results, "dns.https").details, ["诊断代码：OTHER"]);
+  assert.doesNotMatch(one(results, "dns.https").message, /证书|超时/);
+  safe(results);
+});
+
+test("Codex execution denial is reported without exposing command output or suggesting ACL changes", async () => {
+  for (const code of ["EACCES", "EPERM"]) {
+    const result = await runSetupChecks(
+      { ...input, section: "codex" },
+      deps({
+        execFile: async () => {
+          throw Object.assign(new Error(secret), {
+            code,
+            stdout: "Not logged in",
+            stderr: "private-remote-output",
+          });
+        },
+      }),
+    );
+    assert.equal(one(result, "codex.login").status, "failed");
+    assert.match(one(result, "codex.login").message, /系统拒绝执行 Codex 命令.*无法检查登录状态/);
+    assert.doesNotMatch(one(result, "codex.login").message, /尚未登录|ACL|修改权限/);
+    safe(result);
+  }
 });
 
 test("HTTPS requires the exact healthy project schema instead of any HTTP 200", async () => {
@@ -387,7 +711,11 @@ test("HTTPS requires the exact healthy project schema instead of any HTTP 200", 
   ]) {
     const result = await runSetupChecks(
       { ...input, section: "dns" },
-      deps({ requestJson: async () => ({ status: 200, body }) }),
+      deps({
+        timeoutMs: 10,
+        publicTimeoutMs: 250,
+        requestJson: async () => ({ status: 200, body }),
+      }),
     );
     assert.equal(one(result, "dns.https").status, "failed");
   }

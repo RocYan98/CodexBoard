@@ -38,13 +38,13 @@ test("release preserves internal workspace links and rejects links outside the a
   mkdirSync(join(root, "runtime/packages/contracts"), { recursive: true });
   mkdirSync(join(root, "runtime/node_modules/@codexboard"), { recursive: true });
   const link = join(root, "runtime/node_modules/@codexboard/contracts");
-  symlinkSync("../../packages/contracts", link);
+  symlinkSync("../../packages/contracts", link, "dir");
   assert.doesNotThrow(() => assertDistributionClean(root));
   rmSync(link);
-  symlinkSync("../../../../outside", link);
+  symlinkSync("../../../../outside", link, "dir");
   assert.throws(() => assertDistributionClean(root), /应用外/);
   rmSync(link);
-  symlinkSync(homedir(), link);
+  symlinkSync(homedir(), link, "dir");
   assert.throws(() => assertDistributionClean(root), /应用外/);
 });
 
@@ -54,8 +54,10 @@ test("release rejects chained links whose actual target escapes the application"
   mkdirSync(app);
   mkdirSync(join(root, "outside"));
   writeFileSync(join(root, "outside/fixture.txt"), "synthetic outside target");
-  symlinkSync(".", join(app, "alias"));
-  symlinkSync("alias/../outside", join(app, "indirect"));
+  // Win32 resolves dot segments before following links; POSIX resolves them after.
+  const windows = process.platform === "win32";
+  symlinkSync(windows ? "../outside" : ".", join(app, "alias"), "dir");
+  symlinkSync(windows ? "alias" : "alias/../outside", join(app, "indirect"), "dir");
   assert.equal(readFileSync(join(app, "indirect/fixture.txt"), "utf8"), "synthetic outside target");
   assert.throws(() => assertDistributionClean(app), /应用外/);
 });

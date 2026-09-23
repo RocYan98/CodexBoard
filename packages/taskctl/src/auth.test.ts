@@ -1,6 +1,11 @@
 import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import {
+  assertPrivateFileSync,
+  ensurePrivateDirectorySync,
+} from "../../../scripts/private-file-permissions.mjs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   credentialPaths,
@@ -28,7 +33,19 @@ afterEach(async () => {
 async function temporary() {
   const path = await mkdtemp(join(tmpdir(), "taskctl-auth-test-"));
   roots.push(path);
+  ensurePrivateDirectorySync(path);
   return path;
+}
+
+async function makePublic(path: string) {
+  if (process.platform === "win32")
+    execFileSync("icacls.exe", [path, "/grant", "*S-1-1-0:(R)"], { windowsHide: true });
+  else await chmod(path, 0o644);
+}
+
+async function expectPrivate(path: string) {
+  assertPrivateFileSync(path);
+  if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
 }
 
 describe("private CLI credential files", () => {
@@ -97,7 +114,7 @@ describe("private CLI credential files", () => {
       readCredential(store, paths.pending, PendingCredentialSchema, paths.scope, 0),
     ).rejects.toMatchObject({ code: "CLI_AUTH_RUNTIME_MISMATCH" });
     await defaultCredentialStore.write(paths.pending, "new");
-    await chmod(paths.pending, 0o644);
+    await makePublic(paths.pending);
     await expect(store.read(paths.pending)).rejects.toMatchObject({
       code: "CLI_AUTH_FILE_PERMISSIONS",
     });
@@ -106,14 +123,14 @@ describe("private CLI credential files", () => {
     const root = await temporary();
     const path = join(root, "config", "auth.json");
     await defaultCredentialStore.write(path, "private-one");
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    await expectPrivate(path);
     expect(await defaultCredentialStore.read(path)).toBe("private-one");
-    await chmod(path, 0o644);
+    await makePublic(path);
     await expect(defaultCredentialStore.read(path)).rejects.toMatchObject({
       code: "CLI_AUTH_FILE_PERMISSIONS",
     });
     await defaultCredentialStore.write(path, "private-two");
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    await expectPrivate(path);
     expect(await defaultCredentialStore.read(path)).toBe("private-two");
     await defaultCredentialStore.remove(path);
     expect(await defaultCredentialStore.read(path)).toBeNull();

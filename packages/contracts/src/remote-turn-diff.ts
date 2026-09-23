@@ -8,9 +8,14 @@ export function remoteTurnDiff(value: unknown, cwd: string): string {
   if (text(turn.diff).trim()) return text(turn.diff);
   const patches = new Map<string, { header: string; hunks: string[] }>();
   const relative = (value: unknown) => {
-    const path = text(value);
-    const prefix = `${cwd.replace(/\/$/, "")}/`;
-    return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+    const windows = /^[a-z]:[\\/]|^\\\\/i.test(cwd);
+    const path = windows ? text(value).replaceAll("\\", "/") : text(value);
+    const root = windows ? cwd.replaceAll("\\", "/") : cwd;
+    const prefix = `${root.replace(/\/$/, "")}/`;
+    const contained = windows
+      ? path.toLowerCase().startsWith(prefix.toLowerCase())
+      : path.startsWith(prefix);
+    return contained ? path.slice(prefix.length) : path;
   };
   for (const raw of Array.isArray(turn.items) ? turn.items : []) {
     const item = record(raw);

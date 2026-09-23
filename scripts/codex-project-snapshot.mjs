@@ -1,9 +1,7 @@
 import {
-  chmodSync,
   closeSync,
   fsyncSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readFileSync,
   renameSync,
@@ -13,6 +11,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensurePrivateDirectorySync, ensurePrivateFileSync } from "./private-file-permissions.mjs";
 
 function absolutePath(value, label) {
   if (typeof value !== "string" || !isAbsolute(value) || /[\r\n]/.test(value)) {
@@ -59,6 +58,9 @@ export function readCodexDesktopProjects(stateFile) {
   if (!localProjects || typeof localProjects !== "object" || Array.isArray(localProjects)) {
     throw new Error("Codex 项目状态缺少 local-projects");
   }
+  // A fresh Desktop installation can omit project-order until its first
+  // project. Only a valid, empty project map makes that omission unambiguous.
+  if (projectOrder === undefined && Object.keys(localProjects).length === 0) return [];
   if (!Array.isArray(projectOrder)) {
     throw new Error("Codex 项目状态缺少 project-order");
   }
@@ -96,12 +98,11 @@ function normalizedSnapshot(snapshot) {
 export function writeProjectSnapshot(snapshotFile, snapshot) {
   const path = absolutePath(snapshotFile, "Codex 项目快照文件");
   const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(directory);
   const directoryStat = lstatSync(directory);
   if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
     throw new Error("Codex 项目快照目录必须是普通目录");
   }
-  chmodSync(directory, 0o700);
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   let descriptor;
   try {
@@ -110,13 +111,17 @@ export function writeProjectSnapshot(snapshotFile, snapshot) {
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
-    chmodSync(temporary, 0o600);
+    ensurePrivateFileSync(temporary);
     renameSync(temporary, path);
-    const directoryDescriptor = openSync(directory, "r");
-    try {
-      fsyncSync(directoryDescriptor);
-    } finally {
-      closeSync(directoryDescriptor);
+    // Node cannot fsync directory handles on Windows. The file is still flushed
+    // before atomic replacement; directory durability is available on POSIX.
+    if (process.platform !== "win32") {
+      const directoryDescriptor = openSync(directory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
     }
     return true;
   } catch (error) {

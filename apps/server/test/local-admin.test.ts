@@ -268,7 +268,7 @@ describe("local admin HTTP adapter", () => {
         {
           codexProjectId: "11111111-1111-4111-8111-111111111111",
           name: "测试",
-          rootPaths: [realpathSync(root)],
+          rootPaths: [realpathSync.native(root)],
           position: 0,
         },
       ],
@@ -488,7 +488,7 @@ describe("local admin HTTP adapter", () => {
         {
           codexProjectId: "11111111-1111-4111-8111-111111111111",
           name: "本机项目",
-          rootPaths: [realpathSync(root)],
+          rootPaths: [realpathSync.native(root)],
           position: 0,
         },
       ],
@@ -617,7 +617,7 @@ describe("local admin HTTP adapter", () => {
         {
           codexProjectId: "11111111-1111-4111-8111-111111111111",
           name: "调用方项目",
-          rootPaths: [realpathSync(root)],
+          rootPaths: [realpathSync.native(root)],
           position: 0,
         },
       ],
@@ -633,8 +633,15 @@ describe("local admin HTTP adapter", () => {
     };
     const context = await app.inject({ method: "GET", url: "/api/v1/local/context", headers });
     expect(context.statusCode).toBe(200);
-    expect(context.json().data.cwd).toBe(realpathSync(root));
+    expect(context.json().data.cwd).toBe(realpathSync.native(root));
     expect(context.json().data.project.id).toBe(project.id);
+
+    const relativeContext = await app.inject({
+      method: "GET",
+      url: "/api/v1/local/context",
+      headers: { ...headers, "x-taskctl-cwd": "relative/path" },
+    });
+    expect(relativeContext.statusCode).toBe(400);
 
     const nested = join(root, "嵌套项目");
     mkdirSync(nested);
@@ -645,13 +652,13 @@ describe("local admin HTTP adapter", () => {
         {
           codexProjectId: "11111111-1111-4111-8111-111111111111",
           name: "调用方项目",
-          rootPaths: [realpathSync(root)],
+          rootPaths: [realpathSync.native(root)],
           position: 0,
         },
         {
           codexProjectId: "22222222-2222-4222-8222-222222222222",
           name: "嵌套调用方项目",
-          rootPaths: [realpathSync(nested)],
+          rootPaths: [realpathSync.native(nested)],
           position: 1,
         },
       ],
@@ -665,7 +672,7 @@ describe("local admin HTTP adapter", () => {
       headers: { ...headers, "x-taskctl-cwd": encodeURIComponent(nested) },
     });
     expect(nestedContext.statusCode).toBe(200);
-    expect(nestedContext.json().data.cwd).toBe(realpathSync(nested));
+    expect(nestedContext.json().data.cwd).toBe(realpathSync.native(nested));
     expect(nestedContext.json().data.project.id).toBe(nestedProject.id);
 
     const missing = await app.inject({
@@ -696,7 +703,7 @@ describe("local admin HTTP adapter", () => {
         {
           codexProjectId: "11111111-1111-4111-8111-111111111111",
           name: "同步项目",
-          rootPaths: [realpathSync(root)],
+          rootPaths: [realpathSync.native(root)],
           position: 0,
         },
       ],
@@ -875,7 +882,7 @@ it("deletes canceled tasks through the protected service with version checks and
       {
         codexProjectId: "11111111-1111-4111-8111-111111111111",
         name: "删除测试",
-        rootPaths: [realpathSync(root)],
+        rootPaths: [realpathSync.native(root)],
         position: 0,
       },
     ],
@@ -941,7 +948,7 @@ it("deletes canceled tasks through the protected service with version checks and
 
 it("distinguishes Terminal and Codex creation on the authenticated CLI route", async () => {
   const { app, capabilityToken, root, database, projectSync, loginCli } = setup();
-  const cwd = join(realpathSync(root), "repo");
+  const cwd = join(realpathSync.native(root), "repo");
   mkdirSync(cwd);
   const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { stdio: "pipe" });
   git("init", "-b", "main");

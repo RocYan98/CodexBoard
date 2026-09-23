@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ensurePrivateDirectorySync } from "../../../scripts/private-file-permissions.mjs";
 import {
   CreateCommentCommandSchema,
   CreateTaskCommandSchema,
@@ -282,7 +283,7 @@ it("snapshots description and attachment-only comment files with usable download
   }[]) {
     expect(prompt).toContain(attachment.filename);
     expect(prompt).toContain(`/api/v1/local/attachments/${attachment.id}`);
-    expect(attachment.downloadCommand).toContain(
+    expect(attachment.downloadCommand.replaceAll("\\", "/")).toContain(
       `/.tmp/taskboard/${s.task.id}/attachment-${attachment.id}`,
     );
     expect(s.service.open(attachment.id, actor).bytes.toString()).toBe("attachment content");
@@ -385,7 +386,8 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
     downloadPath: string;
   }[];
   const command = snapshot[0]!.downloadCommand;
-  expect(command).toContain("/packages/taskctl/dist/cli.js'");
+  expect(command.replaceAll("\\", "/")).toContain("/packages/taskctl/dist/cli.js'");
+  expect(command.includes("'--preserve-symlinks-main'")).toBe(process.platform === "win32");
   expect(command).toContain(`CODEXBOARD_DATA_DIR='${s.root}'`);
   const capabilityToken = "a".repeat(64);
   const cliAuth = new CliAuthService({
@@ -412,6 +414,7 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
   mkdirSync(join(s.root, "run"));
+  ensurePrivateDirectorySync(join(s.root, "run"));
   const runtime: RuntimeDescriptor = {
     descriptorVersion: 1,
     pid: process.pid,
@@ -432,6 +435,17 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
     const execute = () =>
       promisify(exec)(command, {
         cwd: tmpdir(),
+        ...(process.platform === "win32"
+          ? {
+              shell: join(
+                process.env.SystemRoot ?? "C:\\Windows",
+                "System32",
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe",
+              ),
+            }
+          : {}),
         env: { ...process.env, PATH: "/nonexistent", CODEXBOARD_AUTH_FILE: authFile },
       });
     await expect(execute()).rejects.toMatchObject({ code: 1 });
@@ -466,12 +480,16 @@ it("runs the snapshotted CLI from another cwd only with paired user auth and no 
 it("uses executor-visible paths for attachments when the server runs in Docker", () => {
   const s = setup();
   const attachment = s.upload();
+  const executorDataDirectory =
+    process.platform === "win32"
+      ? "C:\\Users\\example\\AppData\\Local\\Taskboard\\data"
+      : "/Users/example/Library/Application Support/Taskboard/data";
   const queue = new ExecutionQueue({
     database: s.database,
     dataDirectory: "/var/lib/codexboard",
     executorNodePath: "/opt/homebrew/bin/node",
     executorTaskctlPath: "/Users/example/Task Board/packages/taskctl/dist/cli.js",
-    executorDataDirectory: "/Users/example/Library/Application Support/Taskboard/data",
+    executorDataDirectory,
   });
   queue.submit(
     {
@@ -484,11 +502,11 @@ it("uses executor-visible paths for attachments when the server runs in Docker",
   );
   const prompt = String(queue.claimNext("worker")!.workContext.prompt);
   expect(prompt).toContain(
-    "'/opt/homebrew/bin/node' '/Users/example/Task Board/packages/taskctl/dist/cli.js'",
+    process.platform === "win32"
+      ? "'/opt/homebrew/bin/node' '--preserve-symlinks-main' '/Users/example/Task Board/packages/taskctl/dist/cli.js'"
+      : "'/opt/homebrew/bin/node' '/Users/example/Task Board/packages/taskctl/dist/cli.js'",
   );
-  expect(prompt).toContain(
-    "CODEXBOARD_DATA_DIR='/Users/example/Library/Application Support/Taskboard/data'",
-  );
+  expect(prompt).toContain(`CODEXBOARD_DATA_DIR='${executorDataDirectory}'`);
   expect(queue.listTaskJobs(s.task.id)[0]!.workContext.attachmentSnapshot).toEqual([
     expect.objectContaining({ originalAttachmentId: attachment.id }),
   ]);

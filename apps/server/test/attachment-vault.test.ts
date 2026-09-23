@@ -1,3 +1,4 @@
+import { assertPrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
 import { seedProjectMember } from "./helpers/project-member-fixture.js";
 import { TEST_FEISHU_ACTOR, seedFeishuTestActor } from "./helpers/identity.js";
 import {
@@ -65,7 +66,9 @@ describe("AttachmentVault", () => {
     expect(stored.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(vault.open(stored.storageKey)).toEqual(bytes);
     expect(readFileSync(join(root, stored.storageKey))).toEqual(bytes);
-    expect(statSync(join(root, stored.storageKey)).mode & 0o777).toBe(0o600);
+    assertPrivateFileSync(join(root, stored.storageKey));
+    if (process.platform !== "win32")
+      expect(statSync(join(root, stored.storageKey)).mode & 0o777).toBe(0o600);
 
     vault.remove(stored.storageKey);
     expect(existsSync(join(root, stored.storageKey))).toBe(false);

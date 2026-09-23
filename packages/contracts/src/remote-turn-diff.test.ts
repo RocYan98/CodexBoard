@@ -43,3 +43,40 @@ it("prefers published turn diff and wraps new file contents", () => {
     ),
   ).toContain("@@ -0,0 +1,2 @@\n+hello\n+world\n");
 });
+
+it("uses repository-relative Git paths for Windows drive and UNC records", () => {
+  for (const [cwd, path] of [
+    ["C:\\Users\\Yan\\Project", "c:/users/yan/project/src/Main.ts"],
+    ["\\\\server\\share\\Project\\", "\\\\server\\share\\Project\\src\\Main.ts"],
+  ]) {
+    const diff = remoteTurnDiff(
+      {
+        items: [
+          {
+            type: "fileChange",
+            status: "completed",
+            changes: [{ path, kind: { type: "update" }, diff: "@@ -1 +1 @@\n-old\n+new\n" }],
+          },
+        ],
+      },
+      cwd!,
+    );
+    expect(diff).toContain('diff --git "a/src/Main.ts" "b/src/Main.ts"');
+  }
+});
+
+it("does not strip a sibling Windows prefix or change POSIX literal backslashes", () => {
+  const turn = (path: string) => ({
+    items: [
+      {
+        type: "fileChange",
+        status: "completed",
+        changes: [{ path, kind: { type: "add" }, diff: "new\n" }],
+      },
+    ],
+  });
+  expect(remoteTurnDiff(turn("C:\\repo-other\\a.ts"), "C:\\repo")).toContain(
+    '"b/C:/repo-other/a.ts"',
+  );
+  expect(remoteTurnDiff(turn("/repo/a\\b.ts"), "/repo")).toContain('"b/a\\\\b.ts"');
+});

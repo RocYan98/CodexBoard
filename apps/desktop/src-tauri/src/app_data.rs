@@ -116,15 +116,23 @@ pub fn open(home: &Path, attempts: usize) -> Result<(PathBuf, File), String> {
         support = directory(support.as_raw_fd(), OsStr::new(name), true)?;
     }
     let parent = support.as_raw_fd();
-    let existing = LEGACY_NAMES.iter().chain(std::iter::once(&NAME))
+    let existing = LEGACY_NAMES
+        .iter()
+        .chain(std::iter::once(&NAME))
         .map(|name| identity(parent, name).map(|id| (*name, id)))
         .collect::<Result<Vec<_>, _>>()?;
     let present: Vec<_> = existing.iter().filter(|(_, id)| id.is_some()).collect();
     if present.len() > 1 {
-        return Err("新旧应用数据目录同时存在。未合并或覆盖，请先核对目录后再打开 CodexBoard".into());
+        return Err(
+            "新旧应用数据目录同时存在。未合并或覆盖，请先核对目录后再打开 CodexBoard".into(),
+        );
     }
     let selected = present.first().map(|(name, _)| *name).unwrap_or(NAME);
-    let legacy = if selected != NAME { identity(parent, selected)? } else { None };
+    let legacy = if selected != NAME {
+        identity(parent, selected)?
+    } else {
+        None
+    };
     let data = directory(parent, OsStr::new(selected), present.is_empty())?;
     let mut metadata = MaybeUninit::<libc::stat>::uninit();
     if unsafe { libc::fstat(data.as_raw_fd(), metadata.as_mut_ptr()) } != 0 {
@@ -140,7 +148,11 @@ pub fn open(home: &Path, attempts: usize) -> Result<(PathBuf, File), String> {
         return Err("已锁定的数据目录发生变化，未继续启动".into());
     }
     if let Some(expected) = legacy {
-        if identity(parent, selected)? != Some(expected) || existing.iter().any(|(name, _)| *name != selected && identity(parent, name).map_or(true, |id| id.is_some())) {
+        if identity(parent, selected)? != Some(expected)
+            || existing.iter().any(|(name, _)| {
+                *name != selected && identity(parent, name).map_or(true, |id| id.is_some())
+            })
+        {
             return Err("应用数据目录在迁移前发生变化，未覆盖任何目录，请重新检查".into());
         }
         let from = CString::new(selected).unwrap();
@@ -157,7 +169,10 @@ pub fn open(home: &Path, attempts: usize) -> Result<(PathBuf, File), String> {
         {
             return Err("无法移动旧版数据目录，旧数据已保留；请检查目录权限或冲突后重试".into());
         }
-    } else if LEGACY_NAMES.iter().any(|name| identity(parent, name).map_or(true, |id| id.is_some())) {
+    } else if LEGACY_NAMES
+        .iter()
+        .any(|name| identity(parent, name).map_or(true, |id| id.is_some()))
+    {
         return Err("检测到旧版数据目录，未合并或覆盖，请核对新旧目录后重试".into());
     }
     Ok((path(home), lock))
@@ -190,7 +205,9 @@ mod tests {
             Self(fs::canonicalize(root).unwrap())
         }
         fn legacy(&self) -> PathBuf {
-            self.0.join("Library/Application Support").join(LEGACY_NAMES[0])
+            self.0
+                .join("Library/Application Support")
+                .join(LEGACY_NAMES[0])
         }
     }
     impl Drop for Fixture {
@@ -244,7 +261,9 @@ mod tests {
     #[test]
     fn oldest_published_directory_migrates_directly_to_current_brand() {
         let f = Fixture::new();
-        let old = f.0.join("Library/Application Support").join(LEGACY_NAMES[1]);
+        let old =
+            f.0.join("Library/Application Support")
+                .join(LEGACY_NAMES[1]);
         fs::create_dir_all(old.join("data")).unwrap();
         fs::write(old.join("data/keep"), "keep").unwrap();
         let (new, _lock) = open(&f.0, 1).unwrap();

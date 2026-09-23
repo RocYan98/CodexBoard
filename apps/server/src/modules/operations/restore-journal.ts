@@ -1,11 +1,13 @@
+import {
+  ensurePrivateDirectorySync,
+  ensurePrivateFileSync,
+} from "../../../../../scripts/private-file-permissions.mjs";
 import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
   existsSync,
   fsyncSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -32,7 +34,11 @@ const RestoreJournalSchema = z
 export type RestoreJournal = z.infer<typeof RestoreJournalSchema>;
 
 export function syncDurablePath(path: string): void {
-  const descriptor = openSync(path, "r");
+  // Windows cannot open/fsync directories; regular-file flush failures remain fatal.
+  if (process.platform === "win32" && lstatSync(path).isDirectory()) return;
+  // FlushFileBuffers requires GENERIC_WRITE on Windows. r+ grants it without
+  // truncating the existing payload; POSIX can fsync a read-only descriptor.
+  const descriptor = openSync(path, process.platform === "win32" ? "r+" : "r");
   try {
     fsyncSync(descriptor);
   } finally {
@@ -104,6 +110,7 @@ function replaceJournal(dataDirectory: string, journal: RestoreJournal): void {
   const temporary = `${journalPath}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: "wx" });
+    ensurePrivateFileSync(temporary);
     syncDurablePath(temporary);
     renameSync(temporary, journalPath);
     syncDurablePath(runDirectory);
@@ -115,7 +122,7 @@ function replaceJournal(dataDirectory: string, journal: RestoreJournal): void {
 export function writeRestoreJournal(dataDirectory: string, journal: RestoreJournal): void {
   const value = RestoreJournalSchema.parse(journal);
   const { runDirectory, journalPath } = paths(dataDirectory);
-  mkdirSync(runDirectory, { recursive: true, mode: 0o700 });
+  ensurePrivateDirectorySync(runDirectory);
   assertDirectory(runDirectory, "运行时目录");
   if (existsSync(journalPath)) throw new Error("检测到未完成的历史恢复，拒绝开始新的恢复");
   replaceJournal(dataDirectory, value);
@@ -194,7 +201,7 @@ export function recoverInterruptedRestore(
       assertDirectory(rollbackAttachments, "回滚附件目录");
       removeTree(liveAttachments, "当前附件目录");
       move(rollbackAttachments, liveAttachments);
-      chmodSync(liveAttachments, 0o700);
+      ensurePrivateDirectorySync(liveAttachments);
     } else if (!journal.hadAttachments) {
       removeTree(liveAttachments, "当前附件目录");
     }
@@ -204,7 +211,7 @@ export function recoverInterruptedRestore(
     }
     removeDatabaseSidecars(liveDatabase);
     move(rollbackDatabase, liveDatabase);
-    chmodSync(liveDatabase, 0o600);
+    ensurePrivateFileSync(liveDatabase);
   } else if (!existsSync(liveDatabase)) {
     throw new Error("恢复中断且当前数据库缺失，拒绝创建空数据库");
   } else {

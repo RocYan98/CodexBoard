@@ -10,7 +10,7 @@ import { once } from "node:events";
 
 test(
   "desktop command protocol publishes draft check results without saving config or starting services",
-  { timeout: 8000 },
+  { timeout: process.platform === "win32" ? 120_000 : 8_000 },
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "codexboard-setup-runtime-"));
     const child = spawn(
@@ -21,11 +21,21 @@ test(
         join(directory, "state"),
       ],
       {
-        env: { ...process.env, HOME: directory },
+        env: {
+          ...process.env,
+          HOME: directory,
+          ...(process.platform === "win32"
+            ? { USERPROFILE: directory, LOCALAPPDATA: join(directory, "LocalAppData") }
+            : {}),
+        },
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
     const exit = once(child, "exit");
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-4096);
+    });
     const records = [];
     let onRecord;
     createInterface({ input: child.stdout }).on("line", (line) => {
@@ -36,7 +46,15 @@ test(
     async function waitFor(predicate) {
       if (records.some(predicate)) return records.findLast(predicate);
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("No matching desktop response")), 3000);
+        const timer = setTimeout(
+          () => {
+            onRecord = undefined;
+            reject(
+              new Error(`No matching desktop response; exit=${child.exitCode}; stderr=${stderr}`),
+            );
+          },
+          process.platform === "win32" ? 30_000 : 3_000,
+        );
         onRecord = () => {
           const record = records.findLast(predicate);
           if (!record) return;

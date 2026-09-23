@@ -296,7 +296,7 @@ export class ProjectRegistry {
       throw new AppError("CONFIG_INVALID", 500, "工作区允许根目录必须是绝对路径");
     }
     try {
-      const canonical = realpathSync(root);
+      const canonical = realpathSync.native(root);
       if (!statSync(canonical).isDirectory()) {
         throw new Error("not a directory");
       }
@@ -313,7 +313,7 @@ export class ProjectRegistry {
 
     let canonical: string;
     try {
-      canonical = realpathSync(input);
+      canonical = realpathSync.native(input);
       if (!statSync(canonical).isDirectory()) {
         throw new Error("not a directory");
       }
@@ -334,9 +334,9 @@ export class ProjectRegistry {
   async #inspectRepository(workspace: string): Promise<RepositoryInspection> {
     try {
       const rootOutput = await this.#git(workspace, ["rev-parse", "--show-toplevel"]);
-      const rootRealpath = realpathSync(rootOutput.trim());
+      const rootRealpath = realpathSync.native(rootOutput.trim());
       const commonOutput = await this.#git(workspace, ["rev-parse", "--git-common-dir"]);
-      const commonDirectoryRealpath = realpathSync(resolve(workspace, commonOutput.trim()));
+      const commonDirectoryRealpath = realpathSync.native(resolve(workspace, commonOutput.trim()));
       const branch = await this.#gitOptional(workspace, [
         "symbolic-ref",
         "--quiet",
@@ -373,7 +373,7 @@ export class ProjectRegistry {
     const executableBranchPaths = new Map(
       worktrees
         .filter((worktree) => worktree.branch && this.#isAllowedExistingDirectory(worktree.path))
-        .map((worktree) => [worktree.branch as string, realpathSync(worktree.path)]),
+        .map((worktree) => [worktree.branch as string, realpathSync.native(worktree.path)]),
     );
 
     const branchContexts: DiscoveredContext[] = branches.map((branch) => {
@@ -431,7 +431,7 @@ export class ProjectRegistry {
 
   #isAllowedExistingDirectory(path: string): boolean {
     try {
-      const canonical = realpathSync(path);
+      const canonical = realpathSync.native(path);
       return (
         statSync(canonical).isDirectory() &&
         this.#allowedRoots.some((root) => this.#isInside(root, canonical))

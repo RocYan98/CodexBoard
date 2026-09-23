@@ -29,7 +29,11 @@ function run(command, args, options = {}) {
 }
 
 export function assertDistributionClean(app) {
-  const localHome = Buffer.from(homedir());
+  const home = homedir();
+  const localHomes = [
+    ...new Set([home, home.replaceAll("\\", "/"), JSON.stringify(home).slice(1, -1)]),
+  ].map((value) => Buffer.from(value));
+  const outside = (path) => path === ".." || /^\.\.[\\/]/.test(path) || isAbsolute(path);
   const realApp = realpathSync.native(app);
   function visit(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -52,12 +56,7 @@ export function assertDistributionClean(app) {
       if (entry.isSymbolicLink()) {
         const target = readlinkSync(path);
         const relativeTarget = relative(app, resolve(dirname(path), target));
-        if (
-          isAbsolute(target) ||
-          relativeTarget === ".." ||
-          relativeTarget.startsWith("../") ||
-          isAbsolute(relativeTarget)
-        )
+        if (isAbsolute(target) || outside(relativeTarget))
           throw new Error(`分发包中的链接指向应用外：${relative(app, path)}`);
         let realTarget;
         try {
@@ -67,11 +66,12 @@ export function assertDistributionClean(app) {
         } catch {
           throw new Error(`分发包中的链接无法解析：${relative(app, path)}`);
         }
-        if (realTarget === ".." || realTarget.startsWith("../") || isAbsolute(realTarget))
+        if (outside(realTarget))
           throw new Error(`分发包中的链接指向应用外：${relative(app, path)}`);
       } else if (entry.isDirectory()) visit(path);
       else if (entry.isFile()) {
-        if (readFileSync(path).includes(localHome))
+        const contents = readFileSync(path);
+        if (localHomes.some((localHome) => contents.includes(localHome)))
           throw new Error(`分发包中存在私人配置或本机路径：${relative(app, path)}`);
       }
     }

@@ -10,5 +10,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    ...(process.platform === "win32"
+      ? { testTimeout: 30_000, hookTimeout: 30_000, maxWorkers: 2 }
+      : {}),
   },
 });

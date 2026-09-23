@@ -21,7 +21,7 @@ export function assertTaskLifecycleAvailable(database: SqliteDatabase, taskId: s
 
 export function canonicalWorkspace(directory: string): string {
   try {
-    return realpathSync(directory);
+    return realpathSync.native(directory);
   } catch {
     return resolve(directory);
   }

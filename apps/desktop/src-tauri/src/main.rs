@@ -1,9 +1,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod updater;
-mod tray_icon;
-mod skills;
-mod skills_commit;
+#[cfg(target_os = "macos")]
 mod app_data;
+#[cfg(target_os = "windows")]
+#[path = "app_data_windows.rs"]
+mod app_data;
+mod node_command;
+mod skills;
+#[cfg(target_os = "macos")]
+mod skills_commit;
+#[cfg(target_os = "windows")]
+#[path = "skills_commit_windows.rs"]
+mod skills_commit;
+mod tray_icon;
+#[cfg(target_os = "macos")]
+mod updater;
+#[cfg(target_os = "windows")]
+#[path = "updater_windows.rs"]
+mod updater;
+#[cfg(target_os = "windows")]
+mod windows_paths;
 use serde_json::{json, Value};
 use std::{
     fs::File,
@@ -70,15 +85,44 @@ fn open_board(state: tauri::State<Controller>) -> Result<(), String> {
 }
 #[tauri::command]
 fn open_release_page() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
     let status = Command::new("/usr/bin/open")
         .arg("https://github.com/RocYan98/CodexBoard/releases/latest")
-        .status()
-        .map_err(|_| "无法打开默认浏览器".to_string())?;
+        .status();
+    #[cfg(target_os = "windows")]
+    let status = quiet_command("rundll32.exe")
+        .args([
+            "url.dll,FileProtocolHandler",
+            "https://github.com/RocYan98/CodexBoard/releases/latest",
+        ])
+        .status();
+    let status = status.map_err(|_| "无法打开默认浏览器".to_string())?;
     if status.success() {
         Ok(())
     } else {
         Err("无法打开默认浏览器".into())
     }
+}
+fn node_path(root: &std::path::Path) -> PathBuf {
+    root.join(if cfg!(windows) {
+        "bin/node.exe"
+    } else {
+        "bin/node"
+    })
+}
+fn user_home() -> Option<std::ffi::OsString> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+}
+#[cfg(windows)]
+fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
 }
 fn quit(app: tauri::AppHandle) {
     let state = app.state::<Controller>();
@@ -194,6 +238,12 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             "quit-app" => quit(app.clone()),
             _ => {}
         });
+    #[cfg(target_os = "windows")]
+    let tray = tray.icon(
+        app.default_window_icon()
+            .expect("bundled application icon")
+            .clone(),
+    );
     let tray = tray.build(app)?;
     tray_icon::install(&tray)?;
     Ok(())
@@ -202,14 +252,23 @@ fn main() {
     if let Some(code) = skills::handle_commit_cli() {
         std::process::exit(code);
     }
-    let attempts = if std::env::args().any(|arg| ["--codexboard-updated", "--lark-codex-updated"].contains(&arg.as_str())) { 300 } else { 1 };
-    let prepared = std::env::var_os("HOME")
+    let attempts = if std::env::args()
+        .any(|arg| ["--codexboard-updated", "--lark-codex-updated"].contains(&arg.as_str()))
+    {
+        300
+    } else {
+        1
+    };
+    let prepared = user_home()
         .ok_or_else(|| "无法定位当前用户目录".to_string())
         .and_then(|home| app_data::open(&PathBuf::from(home), attempts));
     let (data, lock) = prepared.unwrap_or_else(|message| {
+        #[cfg(target_os = "macos")]
         let _ = Command::new("/usr/bin/osascript")
             .args(["-e", "on run argv\n display alert \"无法启动 CodexBoard\" message (item 1 of argv) as critical\nend run", &message])
             .stdout(Stdio::null()).stderr(Stdio::null()).status();
+        #[cfg(target_os = "windows")]
+        windows_paths::show_error(&message);
         std::process::exit(1);
     });
     let app=tauri::Builder::default().plugin(tauri_plugin_updater::Builder::new().build()).setup(move |app|{
@@ -217,7 +276,7 @@ fn main() {
   app.manage(skills::Skills::default());
   setup_tray(app)?;
   let root=app.path().resource_dir()?.join("runtime");
-  let mut child=Command::new(root.join("bin/node")).arg(root.join("desktop/runtime.mjs")).arg(&root).arg(&data).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+  let mut child=node_command::command(node_path(&root),root.join("desktop/runtime.mjs"))?.arg(&root).arg(&data).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
   let input=child.stdin.take();let output=child.stdout.take().unwrap();let snapshot=Arc::new(Mutex::new(json!({"phase":"starting","message":"正在启动服务管理器…","services":[],"logs":[],"settings":{}})));let copy=snapshot.clone();
   let update_stop_ack=Arc::new(Mutex::new(None));let ack=update_stop_ack.clone();
   std::thread::spawn(move||{for line in BufReader::new(output).lines().map_while(Result::ok){if let Ok(value)=serde_json::from_str::<Value>(&line){if let (Some(id),Some(ok))=(value["id"].as_u64(),value["ok"].as_bool()) { if id>=2 { *ack.lock().unwrap()=Some((id,ok)); } } if value["event"]=="state"{*copy.lock().unwrap()=value["data"].clone()}else if value["ok"]==false{copy.lock().unwrap()["message"]=value["error"].clone()}}}let mut s=copy.lock().unwrap();s["phase"]=json!("error");s["message"]=json!("服务管理器已退出，请重新打开应用");});
@@ -239,7 +298,7 @@ fn main() {
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

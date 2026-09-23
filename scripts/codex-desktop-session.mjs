@@ -17,8 +17,8 @@ import {
   buildRemoteApprovalResponse,
 } from "@codexboard/contracts";
 import { createConnection } from "node:net";
-import { join } from "node:path";
 import { resolveRemoteUploads } from "./codex-remote-upload.mjs";
+import { desktopIpcPath } from "./codex-local-endpoint.mjs";
 
 const versions = {
   "thread-owner-discovery": 1,
@@ -54,7 +54,7 @@ function rpcError(message, code = -32001) {
 // No process termination, lock deletion, history rewriting or duplicate turns.
 export async function connectDesktopSession({
   codexHome,
-  socketPath = join(codexHome, "ipc", "ipc.sock"),
+  socketPath = desktopIpcPath(codexHome),
   threadId,
   onMessage,
   onDisconnect,

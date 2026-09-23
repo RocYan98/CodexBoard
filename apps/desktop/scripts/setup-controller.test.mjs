@@ -99,6 +99,7 @@ test("failed checks always clear busy state and suppress raw error content", asy
 test("opening setup targets uses a fixed allowlist and opens only installed Codex apps", async () => {
   const calls = [];
   const deps = {
+    platform: "darwin",
     execute: async (...args) => calls.push(args),
     exists: (path) => path === "/Applications/ChatGPT.app",
   };
@@ -114,14 +115,75 @@ test("opening setup targets uses a fixed allowlist and opens only installed Code
 test("Codex detection can discover a new installation without restarting the desktop app", () => {
   const installed = new Set();
   assert.equal(
-    detectCodexPath((path) => installed.has(path)),
+    detectCodexPath((path) => installed.has(path), { platform: "darwin" }),
     "/Applications/Codex.app/Contents/Resources/codex",
   );
   installed.add("/Applications/ChatGPT.app/Contents/Resources/codex");
   assert.equal(
-    detectCodexPath((path) => installed.has(path)),
+    detectCodexPath((path) => installed.has(path), { platform: "darwin" }),
     "/Applications/ChatGPT.app/Contents/Resources/codex",
   );
+});
+
+test("Windows setup uses the registered app CLI and activation identity", async () => {
+  const app = {
+    cliPath: "C:\\Program Files\\WindowsApps\\Codex\\app\\resources\\codex.exe",
+    appUserModelId: "OpenAI.Codex_2p2nqsd0c76g0!App",
+  };
+  const calls = [];
+  const deps = {
+    platform: "win32",
+    env: {},
+    findWindowsPackage: () => app,
+    execute: async (...args) => calls.push(args),
+  };
+  assert.equal(
+    detectCodexPath(() => true, deps),
+    app.cliPath,
+  );
+  await openSetupTarget("codex-app", deps);
+  assert.equal(calls[0][0], "explorer.exe");
+  assert.deepEqual(calls[0][1], [`shell:AppsFolder\\${app.appUserModelId}`]);
+  await openSetupTarget("codex-download", deps);
+  assert.equal(calls[1][0], "powershell.exe");
+  assert.match(calls[1][1].at(-1), /https:\/\/developers\.openai\.com\/codex\/app\//);
+  await assert.rejects(
+    openSetupTarget("codex-app", { ...deps, findWindowsPackage: () => undefined }),
+    /安装/,
+  );
+});
+
+test("Windows standalone CLI selection does not replace Desktop activation or require a GUI install", async () => {
+  const localAppData = "C:\\Users\\test\\AppData\\Local";
+  const cliPath = `${localAppData}\\Programs\\OpenAI\\Codex\\bin\\codex.exe`;
+  const app = {
+    cliPath: "C:\\Program Files\\WindowsApps\\Codex\\app\\resources\\codex.exe",
+    appUserModelId: "OpenAI.Codex_2p2nqsd0c76g0!App",
+  };
+  const calls = [];
+  const deps = {
+    platform: "win32",
+    env: {},
+    localAppData,
+    exists: (path) => path === cliPath,
+    findWindowsPackage: () => app,
+    execute: async (...args) => calls.push(args),
+  };
+  assert.equal(detectCodexPath(deps.exists, deps), cliPath);
+  assert.equal(calls.length, 0);
+  await openSetupTarget("codex-app", deps);
+  assert.deepEqual(calls[0].slice(0, 2), [
+    "explorer.exe",
+    [`shell:AppsFolder\\${app.appUserModelId}`],
+  ]);
+  const standaloneOnly = { ...deps, findWindowsPackage: () => undefined };
+  assert.equal(detectCodexPath(deps.exists, standaloneOnly), cliPath);
+  await assert.rejects(openSetupTarget("codex-app", standaloneOnly), /未找到 Codex 应用/);
+  assert.equal(
+    detectCodexPath(() => false, standaloneOnly),
+    "",
+  );
+  assert.equal(calls.length, 1);
 });
 
 test("guide addresses follow the checked draft and an invalid draft clears older addresses", async () => {

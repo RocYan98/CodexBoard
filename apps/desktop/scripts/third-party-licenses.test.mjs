@@ -64,7 +64,7 @@ function fixture(t) {
     const link = `node_modules/@fixture/${name}`;
     lock.packages[link] = { resolved: path, link: true };
     mkdirSync(dirname(join(project, link)), { recursive: true });
-    symlinkSync(`../../${path}`, join(project, link));
+    symlinkSync(join(project, path), join(project, link), "junction");
   }
   packageAt(
     "node_modules/root-dep",

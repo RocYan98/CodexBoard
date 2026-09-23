@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { bridgeSocketPath, isWindowsPipePath } from "../../../scripts/codex-local-endpoint.mjs";
 import {
   startEmbeddedCodexBridge,
   type EmbeddedCodexBridge,
@@ -73,10 +75,14 @@ async function startServer(): Promise<RunningServers> {
       ),
       new BackupService({ database, dataDirectory: config.CODEXBOARD_DATA_DIR }),
     );
-    const codexSocketPath = join(config.CODEXBOARD_DATA_DIR, "codex-app-server.sock");
+    const codexSocketPath = bridgeSocketPath(config.CODEXBOARD_DATA_DIR);
+    const pipeToken = isWindowsPipePath(codexSocketPath)
+      ? randomBytes(32).toString("hex")
+      : undefined;
     if (config.CODEXBOARD_CODEX_TRANSPORT === "managed-unix") {
       codexSupervisor = new CodexAppServerSupervisor({
         socketPath: codexSocketPath,
+        ...(pipeToken ? { token: pipeToken } : {}),
         codexCommand: config.CODEXBOARD_CODEX_COMMAND,
       });
       await codexSupervisor.start();
@@ -91,7 +97,10 @@ async function startServer(): Promise<RunningServers> {
               endpoint: config.CODEXBOARD_CODEX_ENDPOINT,
               tokenFile: config.CODEXBOARD_CODEX_TOKEN_FILE as string,
             })
-          : new UnixWebSocketTransport({ socketPath: codexSocketPath }),
+          : new UnixWebSocketTransport({
+              socketPath: codexSocketPath,
+              ...(pipeToken ? { token: pipeToken } : {}),
+            }),
     });
     const codexExecutor = new AppServerCodexExecutor(
       codexClient,
@@ -164,6 +173,20 @@ async function startServer(): Promise<RunningServers> {
     }
     process.once("SIGINT", () => void shutdown("SIGINT"));
     process.once("SIGTERM", () => void shutdown("SIGTERM"));
+    if (process.connected) {
+      process.on("message", (message: unknown) => {
+        if (
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "codexboard.shutdown"
+        ) {
+          void shutdown("SIGTERM").finally(() => {
+            if (process.connected) process.disconnect?.();
+          });
+        }
+      });
+    }
     publicApp.log.info(
       {
         publicAddress: `${config.CODEXBOARD_HOST}:${config.CODEXBOARD_PORT}`,

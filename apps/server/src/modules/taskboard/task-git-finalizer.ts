@@ -30,7 +30,7 @@ export class TaskGitFinalizer {
     allowedRoots: readonly string[],
     private readonly runner?: WorkspaceCommandRunner,
   ) {
-    this.#allowedRoots = allowedRoots.map((root) => realpathSync(root));
+    this.#allowedRoots = allowedRoots.map((root) => realpathSync.native(root));
   }
 
   async inspect(
@@ -63,13 +63,13 @@ export class TaskGitFinalizer {
       }
       existingWorktree = false;
     }
-    if (existingWorktree && realpathSync(root) !== cwd)
+    if (existingWorktree && realpathSync.native(root) !== cwd)
       throw new AppError("INVALID_REQUEST", 409, "完成检查目录必须是 Git 工作树根目录");
     const fields = (await this.#git(anchor, "worktree", "list", "--porcelain", "-z")).split("\0");
     const mainPath = fields.find((field) => field.startsWith("worktree "))?.slice(9);
     if (!mainPath) throw new AppError("INVALID_REQUEST", 409, "无法确认主工作树");
     const mainCwd = this.#allowed(mainPath);
-    const commonDirectory = realpathSync(
+    const commonDirectory = realpathSync.native(
       resolve(mainCwd, (await this.#git(mainCwd, "rev-parse", "--git-common-dir")).trim()),
     );
     const branch =
@@ -92,7 +92,7 @@ export class TaskGitFinalizer {
     const { cwd, mainCwd, branch, mainTask } = snapshot;
     if (this.#allowed(mainCwd) !== mainCwd || this.#allowed(cwd) !== cwd)
       throw new AppError("VERSION_CONFLICT", 409, "工作树路径已变化");
-    const common = realpathSync(
+    const common = realpathSync.native(
       resolve(mainCwd, (await this.#git(mainCwd, "rev-parse", "--git-common-dir")).trim()),
     );
     if (common !== snapshot.commonDirectory)
@@ -115,7 +115,14 @@ export class TaskGitFinalizer {
       const fields = (await this.#git(mainCwd, "worktree", "list", "--porcelain", "-z")).split(
         "\0",
       );
-      if (cwd !== mainCwd && (existsSync(cwd) || fields.includes(`worktree ${cwd}`)))
+      if (
+        cwd !== mainCwd &&
+        (existsSync(cwd) ||
+          fields.some(
+            (field) =>
+              field.startsWith("worktree ") && canonicalGitDirectory(field.slice(9)) === cwd,
+          ))
+      )
         throw new AppError("INVALID_REQUEST", 409, `工作树尚未删除或仍登记在 Git 中：${cwd}`);
       if (!branch)
         throw new AppError("INVALID_REQUEST", 409, "无法确认任务使用的分支，请核对任务开发上下文");
@@ -177,5 +184,5 @@ export class TaskGitFinalizer {
 export function canonicalGitDirectory(directory: string): string {
   let parent = resolve(directory);
   while (!existsSync(parent) && dirname(parent) !== parent) parent = dirname(parent);
-  return resolve(realpathSync(parent), relative(parent, resolve(directory)));
+  return resolve(realpathSync.native(parent), relative(parent, resolve(directory)));
 }

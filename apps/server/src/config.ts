@@ -1,3 +1,4 @@
+import { assertPrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
 import { fileURLToPath } from "node:url";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -369,10 +370,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   if (config.CODEXBOARD_FEISHU_CREDENTIALS_FILE) {
     const path = config.CODEXBOARD_FEISHU_CREDENTIALS_FILE;
     try {
-      const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
-        throw new Error("凭据文件必须是权限不宽于 0600 的普通文件");
-      }
+      assertPrivateFileSync(path);
       const credentials = z
         .strictObject({
           appId: z
@@ -391,17 +389,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     } catch {
       // JSON 解析异常可能包含凭据片段，只报告固定错误。
       throw new ConfigError([
-        "CODEXBOARD_FEISHU_CREDENTIALS_FILE: 无法读取有效凭据，请检查文件为权限不宽于 0600 的普通文件，且 JSON 包含有效的 appId、appSecret",
+        "CODEXBOARD_FEISHU_CREDENTIALS_FILE: 无法读取有效凭据，请检查文件为仅当前用户可访问的普通文件（POSIX 权限不宽于 0600），且 JSON 包含有效的 appId、appSecret",
       ]);
     }
   }
   if (config.CODEXBOARD_FEISHU_APP_SECRET_FILE) {
     const path = config.CODEXBOARD_FEISHU_APP_SECRET_FILE;
     try {
-      const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
-        throw new Error("文件必须是权限 0600 的普通文件");
-      }
+      assertPrivateFileSync(path);
       const secret = readFileSync(path, "utf8").trim();
       if (!secret) throw new Error("文件内容为空");
       config.CODEXBOARD_FEISHU_APP_SECRET = secret;
@@ -414,10 +409,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   if (config.CODEXBOARD_CODEX_TOKEN_FILE) {
     const path = config.CODEXBOARD_CODEX_TOKEN_FILE;
     try {
-      const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
-        throw new Error("文件必须是权限不宽于 0600 的普通文件");
-      }
+      assertPrivateFileSync(path);
       if (!readFileSync(path, "utf8").trim()) throw new Error("文件内容为空");
     } catch (error: unknown) {
       throw new ConfigError([

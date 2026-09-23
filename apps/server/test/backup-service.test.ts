@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -12,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -37,7 +39,11 @@ afterEach(() => {
 });
 
 function temporaryDirectory(): string {
-  const directory = mkdtempSync(join("/private/tmp", "codexboard-backup-"));
+  const directory = realpathSync.native(
+    mkdtempSync(
+      join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "codexboard-backup-"),
+    ),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -437,7 +443,8 @@ describe("BackupService", () => {
     const events: string[] = [];
 
     finalizeRestoreJournal(dataDirectory, {
-      syncPath: (path) => events.push(`sync:${path.slice(dataDirectory.length) || "/"}`),
+      syncPath: (path) =>
+        events.push(`sync:${path.slice(dataDirectory.length).replaceAll("\\", "/") || "/"}`),
       markCommitted: () => events.push("committed"),
     });
 
@@ -470,11 +477,12 @@ describe("BackupService", () => {
     await BackupService.restore(source, dataDirectory, {
       renamePath: (from, to) => {
         events.push(
-          `rename:${from.slice(dataDirectory.length)}->${to.slice(dataDirectory.length)}`,
+          `rename:${from.slice(dataDirectory.length).replaceAll("\\", "/")}->${to.slice(dataDirectory.length).replaceAll("\\", "/")}`,
         );
         renameSync(from, to);
       },
-      syncPath: (path) => events.push(`sync:${path.slice(dataDirectory.length) || "/"}`),
+      syncPath: (path) =>
+        events.push(`sync:${path.slice(dataDirectory.length).replaceAll("\\", "/") || "/"}`),
     });
 
     const rollbackDatabaseRename = events.findIndex(
@@ -518,7 +526,8 @@ describe("BackupService", () => {
     const events: string[] = [];
 
     recoverInterruptedRestore(dataDirectory, {
-      syncPath: (path) => events.push(`sync:${path.slice(dataDirectory.length) || "/"}`),
+      syncPath: (path) =>
+        events.push(`sync:${path.slice(dataDirectory.length).replaceAll("\\", "/") || "/"}`),
       beforeCleanup: () => events.push("cleanup"),
     });
 
@@ -554,22 +563,25 @@ describe("BackupService", () => {
     }
   });
 
-  it("canonicalizes the macOS tmp alias before enforcing attachment containment", async () => {
-    const dataDirectory = temporaryDirectory();
-    const database = initializeDatabase(join(dataDirectory, "taskboard.sqlite"));
-    const service = new BackupService({ database, dataDirectory });
-    const aliasDestination = join(
-      "/tmp",
-      dataDirectory.slice("/private/tmp/".length),
-      "attachments",
-      "alias-backup",
-    );
-    try {
-      await expect(service.create(aliasDestination)).rejects.toThrow(/附件目录/);
-    } finally {
-      database.close();
-    }
-  });
+  it.runIf(process.platform === "darwin")(
+    "canonicalizes the macOS tmp alias before enforcing attachment containment",
+    async () => {
+      const dataDirectory = temporaryDirectory();
+      const database = initializeDatabase(join(dataDirectory, "taskboard.sqlite"));
+      const service = new BackupService({ database, dataDirectory });
+      const aliasDestination = join(
+        "/tmp",
+        dataDirectory.slice("/private/tmp/".length),
+        "attachments",
+        "alias-backup",
+      );
+      try {
+        await expect(service.create(aliasDestination)).rejects.toThrow(/附件目录/);
+      } finally {
+        database.close();
+      }
+    },
+  );
 
   it("always removes the private inspection copy when SQLite validation fails", async () => {
     const dataDirectory = temporaryDirectory();
@@ -589,7 +601,7 @@ describe("BackupService", () => {
 
     // Other test workers also validate backups. Isolate this synchronous call
     // instead of comparing a shared tmp directory that those workers may clean.
-    vi.stubEnv("TMPDIR", inspectionRoot);
+    vi.stubEnv(process.platform === "win32" ? "TEMP" : "TMPDIR", inspectionRoot);
     try {
       expect(() => BackupService.verify(backupDirectory)).toThrow(/file is not a database/);
       expect(readdirSync(inspectionRoot)).toEqual([]);

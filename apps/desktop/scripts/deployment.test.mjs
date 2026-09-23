@@ -17,6 +17,7 @@ import {
   initializeDeployment,
   desktopPaths,
 } from "./runtime.mjs";
+import { assertPrivateFileSync } from "#private-file-permissions";
 const tunnel = (domain) =>
   `[[proxies]]\nname = "board"\ntype = "https"\nlocalIP = "127.0.0.1"\nlocalPort = 8443\ncustomDomains = ["${domain}"]\n`;
 function fixture(t) {
@@ -77,8 +78,10 @@ test("saves credentials together and derives origin exclusively from frpc", asyn
   });
   assert.equal(result.origin, "https://new.example.com");
   assert.equal(result.appSecret, "new-secret");
-  assert.equal(statSync(f.credentials).mode & 0o777, 0o600);
-  assert.equal(statSync(f.frpc).mode & 0o777, 0o600);
+  if (process.platform === "win32") assert.doesNotThrow(() => assertPrivateFileSync(f.credentials));
+  else assert.equal(statSync(f.credentials).mode & 0o777, 0o600);
+  if (process.platform === "win32") assert.doesNotThrow(() => assertPrivateFileSync(f.frpc));
+  else assert.equal(statSync(f.frpc).mode & 0o777, 0o600);
   assert.equal(existsSync(join(f.dir, "production.env")), false);
   assert.equal(existsSync(join(f.base, "secrets/feishu-app-secret")), false);
 });
@@ -161,7 +164,8 @@ test("first launch creates credentials and token once without env files", (t) =>
   const before = readFileSync(token, "utf8");
   initializeDeployment(f.dir);
   assert.equal(readFileSync(token, "utf8"), before);
-  assert.equal(statSync(token).mode & 0o777, 0o600);
+  if (process.platform === "win32") assert.doesNotThrow(() => assertPrivateFileSync(token));
+  else assert.equal(statSync(token).mode & 0o777, 0o600);
   assert.equal(readDeploymentConfiguration(f.dir).appId, "cli_old");
   assert.equal(existsSync(join(f.dir, "desktop.env")), false);
   assert.equal(existsSync(join(f.dir, "production.env")), false);

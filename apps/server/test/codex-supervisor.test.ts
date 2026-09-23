@@ -11,6 +11,8 @@ import { CodexAppServerSupervisor, type ManagedCodexProcess } from "../src/modul
 class FakeProcess extends EventEmitter implements ManagedCodexProcess {
   readonly pid = 42;
   readonly stderr = new PassThrough();
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
   exitCode: number | null = null;
   killed = false;
   readonly signals: NodeJS.Signals[] = [];
@@ -25,6 +27,54 @@ class FakeProcess extends EventEmitter implements ManagedCodexProcess {
 }
 
 describe("Codex App Server supervisor", () => {
+  it("uses an authenticated Windows pipe without putting the capability in arguments", async () => {
+    const socketPath = "\\\\.\\pipe\\codexboard-supervisor-test";
+    expect(() => new CodexAppServerSupervisor({ socketPath })).toThrow(/认证令牌/);
+    const child = new FakeProcess();
+    child.stdin.once("finish", () => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+    });
+    const spawnProcess = vi.fn<(...args: unknown[]) => FakeProcess>(() => {
+      queueMicrotask(() => child.stdout.write("CODEXBOARD_BRIDGE_READY\n"));
+      return child;
+    });
+    const supervisor = new CodexAppServerSupervisor({
+      socketPath,
+      token: "test-capability",
+      spawnProcess,
+      readinessProbe: async () => true,
+      shutdownTimeoutMs: 20,
+    });
+    await supervisor.start();
+    expect(spawnProcess).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(["--listen", "npipe://./pipe/codexboard-supervisor-test"]),
+      expect.objectContaining({
+        env: expect.objectContaining({ CODEXBOARD_BRIDGE_TOKEN: "test-capability" }),
+      }),
+    );
+    expect(JSON.stringify(spawnProcess.mock.calls[0]?.[1])).not.toContain("test-capability");
+    await supervisor.stop();
+    expect(child.signals).toEqual([]);
+  });
+
+  it("does not trust a reachable Windows pipe until the owned child has bound it", async () => {
+    const child = new FakeProcess();
+    const readinessProbe = vi.fn(async () => true);
+    const supervisor = new CodexAppServerSupervisor({
+      socketPath: "\\\\.\\pipe\\codexboard-preexisting-test",
+      token: "test-capability",
+      spawnProcess: () => child,
+      readinessProbe,
+      startupTimeoutMs: 10,
+      startupPollMs: 1,
+    });
+    await expect(supervisor.start()).rejects.toThrow("Codex App Server 启动失败");
+    expect(readinessProbe).not.toHaveBeenCalled();
+    expect(supervisor.health().status).not.toBe("ready");
+  });
+
   it("starts one owned process, reports health and stops only that child", async () => {
     const child = new FakeProcess();
     const spawnProcess = vi.fn(() => child);
@@ -42,7 +92,8 @@ describe("Codex App Server supervisor", () => {
     expect(spawnProcess).toHaveBeenCalledWith(
       process.execPath,
       [
-        expect.stringContaining("scripts/codex-session-bridge.mjs"),
+        ...(process.platform === "win32" ? ["--preserve-symlinks-main"] : []),
+        expect.stringContaining(join("scripts", "codex-session-bridge.mjs")),
         "--codex",
         "codex",
         "--listen",

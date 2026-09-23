@@ -2,6 +2,7 @@ import { HealthResponseSchema } from "@codexboard/contracts";
 import { execFile as execFileCallback } from "node:child_process";
 import { lookup, resolve4, resolve6, resolveCname } from "node:dns/promises";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { ensurePrivateDirectorySync, ensurePrivateFileSync } from "#private-file-permissions";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { createConnection, isIP } from "node:net";
@@ -14,6 +15,27 @@ import { readFrpcOrigin } from "./frpc-config.mjs";
 export const SETUP_SECTIONS = Object.freeze(["feishu", "web", "tunnel", "dns", "codex"]);
 const FEISHU_ENDPOINT = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal";
 const MAX_BYTES = 64 * 1024;
+const NETWORK_TIMEOUT_CODES = new Set(["SETUP_TIMEOUT", "ETIMEDOUT", "ABORT_ERR"]);
+const NETWORK_CERTIFICATE_CODES = new Set([
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "CERT_REVOKED",
+  "CERT_SIGNATURE_FAILURE",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+const NETWORK_CONNECTION_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+]);
 const execFile = promisify(execFileCallback);
 function timeoutError() {
   return Object.assign(new Error("Probe timed out"), { code: "SETUP_TIMEOUT" });
@@ -147,6 +169,12 @@ export async function runSetupChecks(input, options = {}) {
     Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
       ? Math.min(options.timeoutMs, 5000)
       : 3500;
+  // Public health includes Internet routing, the tunnel and TLS establishment.
+  // Keep its deadline separate from local commands and individual DNS queries.
+  const publicTimeoutMs =
+    Number.isFinite(options.publicTimeoutMs) && options.publicTimeoutMs > 0
+      ? Math.min(options.publicTimeoutMs, 10_000)
+      : 10_000;
   const selected =
     input.section === "all" || !input.section
       ? SETUP_SECTIONS.filter((section) =>
@@ -169,8 +197,11 @@ export async function runSetupChecks(input, options = {}) {
       results.push(result);
       options.onResult?.(result);
     }
-    const network = (url, request = {}) =>
-      limited((signal) => deps.requestJson(url, { ...request, signal, timeoutMs }), timeoutMs);
+    const network = (url, request = {}, limitMs = timeoutMs) =>
+      limited(
+        (signal) => deps.requestJson(url, { ...request, signal, timeoutMs: limitMs }),
+        limitMs,
+      );
     const command = (file, args) =>
       limited(
         (signal) =>
@@ -303,8 +334,11 @@ export async function runSetupChecks(input, options = {}) {
       try {
         if (!input.frpcBinary) throw new Error("Missing frpc executable");
         directory = await mkdtemp(join(tmpdir(), "codexboard-setup-check-"));
+        ensurePrivateDirectorySync(directory);
         const file = join(directory, "frpc.toml");
-        await writeFile(file, input.frpc, { mode: 0o600, flag: "wx" });
+        await writeFile(file, "", { mode: 0o600, flag: "wx" });
+        ensurePrivateFileSync(file);
+        await writeFile(file, input.frpc);
         await command(input.frpcBinary, ["verify", "-c", file]);
         emit(
           "tunnel.verify",
@@ -414,19 +448,61 @@ export async function runSetupChecks(input, options = {}) {
         const details = records.flatMap((values, index) =>
           values.map((value) => `${["A", "AAAA", "CNAME"][index]}：${value}`),
         );
-        emit(
-          "dns.records",
-          "公网 DNS",
-          records[0].length || records[1].length ? "passed" : "failed",
-          records[0].length || records[1].length
-            ? "域名已解析到可用的 IP 地址；入口地址可与隧道节点不同。"
-            : "域名尚未解析到 IP 地址，请检查 DNS 记录，修改后等待解析生效。",
-          details,
-        );
+        if (records[0].length || records[1].length) {
+          emit(
+            "dns.records",
+            "公网 DNS",
+            "passed",
+            "域名已解析到可用的 IP 地址；入口地址可与隧道节点不同。",
+            details,
+          );
+        } else {
+          const directAnswered = answers
+            .slice(0, 2)
+            .some(
+              (answer) =>
+                (answer.status === "fulfilled" && Array.isArray(answer.value)) ||
+                (answer.status === "rejected" &&
+                  ["ENODATA", "ENOTFOUND"].includes(answer.reason?.code)),
+            );
+          let systemAnswered;
+          let addresses = [];
+          try {
+            // lookup follows the OS resolver (including its cache/hosts), unlike
+            // resolve*. Its success is not proof of a public A/AAAA DNS record.
+            const values = await limited(() => deps.lookup(hostname, { all: true }), timeoutMs);
+            systemAnswered = true;
+            if (Array.isArray(values))
+              addresses = values
+                .filter(
+                  (value) =>
+                    typeof value?.address === "string" &&
+                    [4, 6].includes(value.family) &&
+                    isIP(value.address) === value.family,
+                )
+                .slice(0, 10);
+          } catch (error) {
+            systemAnswered = ["ENODATA", "ENOTFOUND"].includes(error?.code);
+          }
+          emit(
+            "dns.records",
+            "域名解析",
+            addresses.length ? "passed" : "failed",
+            addresses.length
+              ? `系统域名解析可用；${directAnswered ? "直接 DNS 查询未得到可用的 A/AAAA 记录" : "直接 DNS 记录查询不可用"}，尚未核验公网 DNS 记录。`
+              : directAnswered || systemAnswered
+                ? "域名解析未得到可用的 IP 地址，请检查域名配置及系统解析设置后重试。"
+                : "直接 DNS 查询与系统域名解析均不可用，暂时无法确认域名是否已解析，请检查网络后重试。",
+            [
+              ...details,
+              ...addresses.map(({ address, family }) => `系统 IPv${family}：${address}`),
+            ],
+          );
+        }
       }
       const protocolName = url.protocol === "http:" ? "HTTP" : "HTTPS";
       try {
-        const response = await network(new URL("/api/health", origin).href);
+        const response = await network(new URL("/api/health", origin).href, {}, publicTimeoutMs);
         const parsed = HealthResponseSchema.safeParse(response.body);
         if (
           response.status !== 200 ||
@@ -460,15 +536,23 @@ export async function runSetupChecks(input, options = {}) {
               : "TLS 证书有效，公网已返回健康的 CodexBoard 看板服务。",
           );
         }
-      } catch {
-        emit(
-          "dns.https",
-          `公网 ${protocolName}`,
-          "failed",
-          url.protocol === "http:"
-            ? "HTTP 公网连接失败，请检查公网 IP、remotePort、Caddy、隧道连接和后端状态。"
-            : "HTTPS 连接或证书验证失败，请检查域名解析、Caddy 证书、隧道连接和系统时间。",
-        );
+      } catch (error) {
+        let code = error?.name === "AbortError" ? "ABORT_ERR" : error?.code;
+        let message;
+        if (NETWORK_TIMEOUT_CODES.has(code))
+          message = `公网 ${protocolName} 探测超时，请检查网络、隧道连接和后端响应后重试。`;
+        else if (NETWORK_CERTIFICATE_CODES.has(code))
+          message = "HTTPS 证书校验失败，请检查域名、Caddy 证书和系统时间。";
+        else if (NETWORK_CONNECTION_CODES.has(code))
+          message =
+            url.protocol === "http:"
+              ? "HTTP 公网连接失败，请检查公网 IP、remotePort、隧道连接和后端状态。"
+              : "HTTPS 公网连接失败或已中断，请检查域名解析、隧道连接和网络后重试。";
+        else {
+          code = "OTHER";
+          message = `公网 ${protocolName} 探测失败，原因尚未确定，请稍后重试。`;
+        }
+        emit("dns.https", `公网 ${protocolName}`, "failed", message, [`诊断代码：${code}`]);
       }
     }
     if (section === "codex") {
@@ -510,11 +594,13 @@ export async function runSetupChecks(input, options = {}) {
           "failed",
           error?.code === "ENOENT"
             ? "未找到 Codex 可执行文件，请检查已安装的 Codex 应用路径。"
-            : error?.code === "SETUP_TIMEOUT" || error?.killed || error?.name === "AbortError"
-              ? "Codex 登录状态检查超时，请打开 Codex 确认运行正常后重试。"
-              : loggedOut(output)
-                ? "Codex 尚未登录，请在 Codex 中完成登录后重试。"
-                : "Codex 登录状态检查失败，请打开 Codex 检查账号后重试。",
+            : error?.code === "EACCES" || error?.code === "EPERM"
+              ? "系统拒绝执行 Codex 命令，无法检查登录状态；请确认 Codex 已正确安装并能正常打开。"
+              : error?.code === "SETUP_TIMEOUT" || error?.killed || error?.name === "AbortError"
+                ? "Codex 登录状态检查超时，请打开 Codex 确认运行正常后重试。"
+                : loggedOut(output)
+                  ? "Codex 尚未登录，请在 Codex 中完成登录后重试。"
+                  : "Codex 登录状态检查失败，请打开 Codex 检查账号后重试。",
         );
       }
     }

@@ -100,7 +100,17 @@ copyRuntimeScripts(project, runtime);
 copyBundledSkill(project, runtime, version);
 writeFileSync(
   join(runtime, "package.json"),
-  JSON.stringify({ name: "codexboard-desktop-runtime", version, type: "module" }),
+  JSON.stringify({
+    name: "codexboard-desktop-runtime",
+    version,
+    type: "module",
+    imports: {
+      "#private-file-permissions": "./scripts/private-file-permissions.mjs",
+      "#codex-windows-app": "./scripts/codex-windows-app.mjs",
+      "#node-script-arguments": "./scripts/node-script-arguments.mjs",
+      "#windows-system-environment": "./scripts/windows-system-environment.mjs",
+    },
+  }),
 );
 copyRuntimeDependencies(project, runtime);
 mkdirSync(join(runtime, "node_modules/@codexboard"), { recursive: true });

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createApp } from "../src/app.js";
+import { appControl, createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import type { CodexExecutionCallbacks, CodexExecutor } from "../src/modules/execution/index.js";
 import { initializeDatabase, type SqliteDatabase } from "../src/modules/database/index.js";
@@ -76,6 +76,7 @@ class ApprovalExecutor implements CodexExecutor {
 }
 
 class BlockingExecutor implements CodexExecutor {
+  #released = false;
   readonly interruptions: { readonly threadId: string; readonly turnId: string }[] = [];
   readonly #active = new Map<
     string,
@@ -117,6 +118,7 @@ class BlockingExecutor implements CodexExecutor {
   }
 
   completeAll(): void {
+    this.#released = true;
     for (const [turnId, active] of this.#active) {
       active.resolve({ threadId: active.threadId, turnId, status: "completed" });
     }
@@ -127,6 +129,7 @@ class BlockingExecutor implements CodexExecutor {
     const turnId = `turn-blocking-${crypto.randomUUID()}`;
     callbacks.onThread(threadId);
     callbacks.onTurn(turnId);
+    if (this.#released) return { threadId, turnId, status: "completed" as const };
     return new Promise<{
       readonly threadId: string;
       readonly turnId: string;
@@ -426,8 +429,10 @@ describe("Codex execution HTTP routes", () => {
 
   it("processes cancellation even when both execution workers are occupied", async () => {
     const executor = new BlockingExecutor();
-    const { app, tasks, headers } = await setup(executor, 2);
+    const { app, database, tasks, headers } = await setup(executor, 2);
+    const workspaceStops = vi.spyOn(appControl(app).services.queue, "captureWorkspaceStop");
     const starts = [];
+    const failures: unknown[] = [];
 
     try {
       for (const [index, task] of tasks.entries()) {
@@ -461,8 +466,58 @@ describe("Codex execution HTTP routes", () => {
         expect(target.json().data.status).toBe("canceled");
         expect(executor.interruptions).toHaveLength(1);
       });
-    } finally {
-      executor.completeAll();
+    } catch (error) {
+      failures.push(error);
     }
+    executor.completeAll();
+    try {
+      const jobIds = starts.flatMap((response) => {
+        const id = response.json().data?.id as unknown;
+        return response.statusCode === 202 && typeof id === "string" ? [id] : [];
+      });
+      try {
+        // Releasing the fake executor starts real asynchronous Git fingerprinting.
+        // Let jobs persist their stop evidence before shutting down the database.
+        await vi.waitFor(
+          async () => {
+            for (const id of jobIds) {
+              const response = await app.inject({
+                method: "GET",
+                url: `/api/v1/jobs/${id}`,
+                headers,
+              });
+              expect(response.statusCode).toBe(200);
+              expect(["succeeded", "canceled"]).toContain(response.json().data.status);
+            }
+          },
+          { timeout: 10_000 },
+        );
+        for (const id of jobIds) {
+          expect(
+            database
+              .prepare("SELECT after_fingerprint FROM job_workspace_evidence WHERE job_id = ?")
+              .get(id),
+          ).toEqual({ after_fingerprint: expect.any(String) });
+        }
+      } finally {
+        try {
+          // Stop prevents any new captures. Both workers can capture the canceled
+          // job, so await every real call before afterEach removes their Git cwd.
+          await app.close();
+          await Promise.all(
+            workspaceStops.mock.results
+              .filter((result) => result.type === "return")
+              .map((result) => result.value),
+          );
+        } finally {
+          workspaceStops.mockRestore();
+        }
+      }
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, "Execution assertion and fixture shutdown both failed");
   });
 });

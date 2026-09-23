@@ -1,3 +1,5 @@
+import { ensurePrivateFileSync } from "../../../scripts/private-file-permissions.mjs";
+import { bridgeSocketPath, isWindowsPipePath } from "../../../scripts/codex-local-endpoint.mjs";
 import { createServer, type Server } from "node:http";
 import { PassThrough } from "node:stream";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -81,13 +83,16 @@ describe("Codex transports", () => {
   it("uses one JSON-RPC message per WebSocket frame over a Unix socket", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexboard-ws-"));
     socketDirectories.push(directory);
-    const socketPath = join(directory, "app-server.sock");
+    const socketPath = bridgeSocketPath(directory);
+    const pipeToken = isWindowsPipePath(socketPath) ? "test-only-pipe-capability" : undefined;
     const server = createServer();
     servers.push(server);
     const webSocketServer = new WebSocketServer({ server });
     const receivedByServer: JsonRpcMessage[] = [];
     let requestedExtensions: string | undefined;
+    let pipeAuthorization: string | undefined;
     webSocketServer.on("connection", (socket, request) => {
+      pipeAuthorization = request.headers.authorization;
       requestedExtensions = request.headers["sec-websocket-extensions"];
       socket.on("message", (data) => {
         const message = JSON.parse(data.toString("utf8")) as JsonRpcMessage;
@@ -100,7 +105,10 @@ describe("Codex transports", () => {
       server.listen(socketPath, () => resolve());
     });
 
-    const transport = new UnixWebSocketTransport({ socketPath });
+    const transport = new UnixWebSocketTransport({
+      socketPath,
+      ...(pipeToken ? { token: pipeToken } : {}),
+    });
     const receivedByClient: unknown[] = [];
     transport.onMessage((message) => receivedByClient.push(message));
     await transport.connect();
@@ -115,6 +123,7 @@ describe("Codex transports", () => {
     });
     expect(receivedByClient[0]).toEqual({ id: 9, result: { ok: true } });
     expect(requestedExtensions).toBeUndefined();
+    expect(pipeAuthorization).toBe(pipeToken ? `Bearer ${pipeToken}` : undefined);
     await transport.close();
     await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
   });
@@ -124,6 +133,7 @@ describe("Codex transports", () => {
     socketDirectories.push(directory);
     const tokenFile = join(directory, "codex-token");
     writeFileSync(tokenFile, "capability-token\n", { mode: 0o600 });
+    ensurePrivateFileSync(tokenFile);
     const server = createServer();
     servers.push(server);
     const webSocketServer = new WebSocketServer({ server });
@@ -166,4 +176,10 @@ describe("Codex transports", () => {
     await transport.close();
     await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
   });
+});
+
+it("requires authentication for a Windows named-pipe transport", () => {
+  expect(() => new UnixWebSocketTransport({ socketPath: "\\\\.\\pipe\\codexboard-test" })).toThrow(
+    /capability token/,
+  );
 });

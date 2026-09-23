@@ -136,7 +136,10 @@ test("uses only the latest turn's recorded patch for turn review", async (t) => 
 
 test("rejects paths outside the indexed review set and previews symlinks without following them", async (t) => {
   const cwd = await repository(t);
-  await symlink("/etc/passwd", join(cwd, "link.txt"));
+  const target = `${cwd}-private-target`;
+  await writeFile(target, "private-outside-content");
+  t.after(() => rm(target, { force: true }));
+  await symlink(target, join(cwd, "link.txt"));
   await writeFile(join(cwd, "binary.bin"), Buffer.from([0, 1, 2, 3]));
   const snapshot = { cwd };
   for (const path of ["../outside", "/etc/passwd", ".git/config", ":(glob)*", "missing.txt"])
@@ -144,11 +147,11 @@ test("rejects paths outside the indexed review set and previews symlinks without
   const result = await readRemoteReview(snapshot, { scope: "branch" });
   assert.equal(result.files.find((f) => f.path === "binary.bin").binary, true);
   const link = await readRemoteReview(snapshot, { scope: "branch", path: "link.txt" });
-  assert.match(link.patch, /\+\/etc\/passwd/);
-  assert.doesNotMatch(link.patch, /root:/);
+  assert.ok(link.patch.includes(`+${target}\n`));
+  assert.doesNotMatch(link.patch, /private-outside-content/);
   assert.equal(
     (await readRemoteReview(snapshot, { scope: "branch", path: "link.txt", view: "file" })).content,
-    "/etc/passwd",
+    target,
   );
   await mkdir(join(cwd, "nested"));
   assert.equal(
@@ -192,7 +195,7 @@ test("bounds large previews and reads linked worktrees and literal special filen
   assert.equal(large.patch, "");
   const worktree = join(cwd, "linked");
   git(cwd, "worktree", "add", "-b", "feature/linked", worktree);
-  const path = "literal [a]*.txt";
+  const path = process.platform === "win32" ? "literal [a].txt" : "literal [a]*.txt";
   await writeFile(join(worktree, path), "literal\n");
   const file = await readRemoteReview({ cwd: worktree }, { scope: "branch", path });
   assert.match(file.patch, /\+literal/);
