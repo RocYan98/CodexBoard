@@ -8,9 +8,9 @@
 
 **用户指南** · [给 Agent 的操作指南](AGENTS.md)
 
-CodexBoard 将项目任务看板与本机 Codex 连接起来。你可以整理项目和任务、提交需求、查看执行进度，并在需要时处理审批或补充信息。Mac 应用负责启动和管理本机服务，看板可通过 HTTPS 浏览器账号登录，也可在飞书中使用；两种方式可以同时配置。
+CodexBoard 将项目任务看板与本机 Codex 连接起来。你可以整理项目和任务、提交需求、查看执行进度，并在需要时处理审批或补充信息。桌面应用负责启动和管理本机服务，看板可通过 HTTPS 浏览器账号登录，也可在飞书中使用；两种方式可以同时配置。
 
-当前为 **0.1.11 预览版**，支持 **Apple Silicon Mac · macOS 13 或更新版本**。
+当前版本 **1.0.0**，提供 **macOS arm64** 和 **Windows x64** 安装包。macOS 要求 13 或更新版本；Windows 构建和安装已在 Windows Server 2022 验证，Windows 11 实机和真实任务执行尚未完成验证。
 
 ## 访问方式
 
@@ -67,15 +67,29 @@ CodexBoard 将项目任务看板与本机 Codex 连接起来。你可以整理�
 
 | 需要准备                     | 说明                                                               |
 | ---------------------------- | ------------------------------------------------------------------ |
-| Apple Silicon Mac            | macOS 13+；当前安装包不支持 Intel Mac、Windows 或 Linux            |
+| Apple Silicon Mac            | macOS 13+；不支持 Intel Mac 或 Linux                               |
+| Windows x64（另一安装选择）  | 提供 NSIS 安装包；需要 WebView2（安装器可下载）                    |
 | Codex                        | 已安装并登录，在本机可以正常使用                                   |
 | 飞书客户端与自建应用（可选） | 使用飞书入口或飞书 CLI 配对时需要；Web 看板及 Web CLI 配对不需要   |
-| 公网 frp 隧道服务            | 准备可用的服务端或服务商配置，用于访问 Mac 上的本地服务            |
+| 公网 frp 隧道服务            | 准备可用的服务端或服务商配置，用于访问电脑上的本地服务             |
 | 域名（按隧道类型需要）       | HTTP/HTTPS 域名入口需要 DNS 配置；TCP 公网 IPv4 模式可以不使用域名 |
 
 安装包已包含 **Node.js、看板前后端、Codex 桥接、SQLite 组件、Caddy 和 frp 客户端**。无需另装 Node.js、Docker、Rust 或开发工具。Codex 和公网 frp 服务端需要自行准备；使用飞书方式时另行准备飞书客户端与自建应用。
 
-## 下载与安装
+## 1.0.0 更新
+
+- macOS 与 Windows 共用最新任务面板和 Remote 修复，包括首次发送、移动端登录导航、输入框与键盘布局、附件选择。
+- 模型目录动态跟随本机 Desktop；Default 推荐档位从有效 Desktop 缓存读取，无法读取时不虚构可选组合。
+- 改善旧对话与大历史加载，未加载会话的发现等待缩短；Remote 按实际活动时间排序，项目归属不再依赖旧目录名称。
+
+## Windows 下载与安装
+
+1. 在 [v1.0.0 Release](https://github.com/RocYan98/CodexBoard/releases/tag/v1.0.0) 下载 `CodexBoard-1.0.0-windows-x64-setup.exe` 和对应 `.sha256`，用 PowerShell `Get-FileHash -Algorithm SHA256 .\CodexBoard-1.0.0-windows-x64-setup.exe` 核对校验值。
+2. 正常退出旧 CodexBoard，运行安装器。默认程序目录为 `%LOCALAPPDATA%\CodexBoard Desktop`，数据在独立的 `%LOCALAPPDATA%\CodexBoard`，不要删除数据目录。已有 Windows Test 版本应先退出；新包沿用数据目录，不要同时启动两套服务。
+3. 安装器按需下载 WebView2；启动后在应用中完成连接配置、Web 账号或飞书设置。Codex Desktop 仍需自行安装并登录。
+4. Windows 当前通过下载新版安装器升级，不提供应用内自动安装更新。安装包尚无 Authenticode 签名；若系统拦截，请核对来源与校验值，由用户处理提示，不关闭系统保护。
+
+## macOS 下载与安装
 
 1. 打开本仓库的 [Releases 页面](https://github.com/RocYan98/CodexBoard/releases)，在所选版本的 **Assets** 中下载 `CodexBoard-版本号-macos-arm64.dmg`。`Source code` 压缩包不是安装包。
 2. 如果已安装旧版，先结束或妥善处理正在执行的看板任务，再从菜单栏正常退出 CodexBoard。
@@ -170,7 +184,7 @@ Agent 指南提供内置 `taskctl` 的入口、身份配对、只读检查和常
 
 ## 更新与数据
 
-在 **应用设置 → 应用更新** 中，可通过“前往 Release 手动下载”打开最新发布页，也可在此处或菜单栏检查新版本。应用每天自动检查一次，发现新版本后显示提醒和更新说明。下载并验证完成后，点击“安装并重启”，按提示处理正在执行的任务，再确认安装。检查和下载期间服务继续运行；安装时本机服务会暂时停止。
+macOS 在 **应用设置 → 应用更新** 中，可通过“前往 Release 手动下载”打开最新发布页，也可在此处或菜单栏检查新版本。应用每天自动检查一次，发现新版本后显示提醒和更新说明。下载并验证完成后，点击“安装并重启”，按提示处理正在执行的任务，再确认安装。检查和下载期间服务继续运行；安装时本机服务会暂时停止。
 
 更新包使用独立签名校验。无法自动更新时，可正常退出旧版，再用新版 DMG 替换“应用程序”中的 `CodexBoard.app`。配置、数据库和附件保存在：
 

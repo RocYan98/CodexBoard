@@ -2,7 +2,7 @@ name: Windows build and validation
 
 on:
   push:
-    branches: [feature/windows-ci]
+    branches: [main, feature/windows-ci, feature/release-1.0.0]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -180,7 +180,7 @@ jobs:
           path: test-results/windows/desktop-check/
 
   installer:
-    name: Windows x64 / Test installer
+    name: Windows x64 / Installer
     runs-on: windows-2022
     timeout-minutes: 40
     steps:
@@ -198,12 +198,12 @@ jobs:
           toolchain: stable
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
-      - name: Build Windows test installer with verified runtime assets
+      - name: Build Windows installer with verified runtime assets
         run: node apps/desktop/scripts/build-windows.mjs
-      - name: Upload test installer and checksums
+      - name: Upload installer and checksums
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: windows-x64-test-installer-${{ github.sha }}
+          name: windows-x64-installer-${{ github.sha }}
           retention-days: 14
           if-no-files-found: error
           path: apps/desktop/dist/windows-x64/
@@ -230,10 +230,10 @@ jobs:
           | Node and web build, typecheck, lint | $env:BUILD_RESULT |
           | All six test suites | $env:TEST_RESULT |
           | Desktop Rust compilation and native Node launch | $env:DESKTOP_RESULT |
-          | Windows test installer | $env:INSTALLER_RESULT |
+          | Windows installer | $env:INSTALLER_RESULT |
 
           Download per-suite logs, JUnit reports and compiled assets from this run's artifacts.
-          The installer is an unsigned test artifact, not a Release. A logged-in Codex desktop session is validated separately.
+          The installer is unsigned; publication is handled after all checks pass. A logged-in Codex desktop session is validated separately.
           A failed check is an unresolved compatibility issue or infrastructure error; inspect its log.
           "@ | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           if (@($env:BUILD_RESULT, $env:TEST_RESULT, $env:DESKTOP_RESULT, $env:INSTALLER_RESULT) | Where-Object { $_ -ne 'success' }) {

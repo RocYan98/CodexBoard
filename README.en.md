@@ -8,9 +8,9 @@ Connect your projects to Codex and turn ideas into progress.
 
 **User guide** · [Agent operating guide (Chinese)](AGENTS.md)
 
-CodexBoard connects your project task board to Codex running on your Mac. Organize projects and tasks, submit requests, track execution, and handle approvals or requests for more information. The Mac app starts and manages local services; you access the board through HTTPS with a locally created Web account, through Lark, or both.
+CodexBoard connects your project task board to Codex running on your computer. Organize projects and tasks, submit requests, track execution, and handle approvals or requests for more information. The desktop app starts and manages local services; you access the board through HTTPS with a locally created Web account, through Lark, or both.
 
-Current release: **0.1.11 preview**, for **Apple Silicon Macs running macOS 13 or later**.
+Current release: **1.0.0**, with **macOS arm64** and **Windows x64** installers. macOS requires 13 or later. Windows builds and installation have been verified on Windows Server 2022; Windows 11 hardware and real task execution remain unverified.
 
 ## Access methods
 
@@ -66,7 +66,8 @@ Sign in over HTTPS with a locally created Web account. Click a thumbnail to view
 
 | Requirement                           | Details                                                                                                                        |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Apple Silicon Mac                     | macOS 13 or later. The current installer does not support Intel Macs, Windows, or Linux.                                       |
+| Apple Silicon Mac                     | macOS 13 or later. Intel Macs and Linux are not supported.                                                                     |
+| Windows x64 (alternative)             | NSIS installer; WebView2 is required and can be downloaded by the installer.                                                   |
 | Codex                                 | Installed, signed in, and working locally.                                                                                     |
 | Lark client and custom app (optional) | Required for Lark access or Lark CLI pairing; not required for the Web board or Web CLI pairing.                               |
 | Public frp tunnel service             | A working server or service-provider configuration to access the local services on your Mac.                                   |
@@ -74,7 +75,17 @@ Sign in over HTTPS with a locally created Web account. Click a thumbnail to view
 
 The installer includes **Node.js, the board's frontend and backend, the Codex bridge, SQLite components, Caddy, and the frp client**. You do not need to install Node.js, Docker, Rust, or development tools separately. You must provide Codex and a public frp server. Lark is optional for Web-only access.
 
-## Download and install
+## Changes in 1.0.0
+
+Both platforms include the latest first-send, mobile navigation, keyboard, attachment, and large conversation history fixes. The model catalog follows Desktop; Default presets use its valid cache rather than invented combinations. Remote uses activity time and explicit project assignments, including tasks in renamed folders or worktrees.
+
+## Windows installation
+
+Download `CodexBoard-1.0.0-windows-x64-setup.exe` and its `.sha256` from [v1.0.0](https://github.com/RocYan98/CodexBoard/releases/tag/v1.0.0). Compare the checksum with PowerShell `Get-FileHash -Algorithm SHA256`. Quit the old CodexBoard before installing. The default app folder is `%LOCALAPPDATA%\CodexBoard Desktop`; persistent data remains in `%LOCALAPPDATA%\CodexBoard`. Do not remove that data folder or run the old Windows Test app and the new app together.
+
+The installer can download WebView2. Install and sign in to Codex Desktop separately. Windows upgrades currently use a downloaded installer; in-app installation of updates is unavailable. Windows installers do not have an Authenticode signature. If Windows blocks one, verify its source and checksum and handle the system prompt yourself; do not disable system protection.
+
+## macOS installation
 
 1. Open the repository's [Releases page](https://github.com/RocYan98/CodexBoard/releases) and download `CodexBoard-VERSION-macos-arm64.dmg` from the selected release's **Assets**. The `Source code` archives are not installers.
 2. If an older version is installed, finish or safely handle any running board tasks, then quit CodexBoard normally from its menu.
@@ -171,7 +182,7 @@ The agent guide covers the built-in `taskctl` entry point, identity pairing, rea
 
 ## Updates and data
 
-Under **应用设置 → 应用更新 (App Settings → App Updates)**, use **前往 Release 手动下载 (Download from Release)** to open the latest release in your browser, or check for updates here or from the menu bar. The app also checks automatically once a day and displays a notification and release notes when a new version is available. Once the download has been verified, click **安装并重启 (Install and Restart)**, handle running tasks as prompted, and confirm installation. Services keep running during checks and downloads; installation briefly stops the local services.
+On macOS, under **应用设置 → 应用更新 (App Settings → App Updates)**, use **前往 Release 手动下载 (Download from Release)** to open the latest release in your browser, or check for updates here or from the menu bar. The app also checks automatically once a day and displays a notification and release notes when a new version is available. Once the download has been verified, click **安装并重启 (Install and Restart)**, handle running tasks as prompted, and confirm installation. Services keep running during checks and downloads; installation briefly stops the local services.
 
 Update packages are verified with a separate signing key. If automatic updating is unavailable, quit the old version normally and replace `CodexBoard.app` in Applications using the new DMG. Configuration, the database, and attachments are stored in:
 

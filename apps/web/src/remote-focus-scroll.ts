@@ -1,5 +1,3 @@
-import { isFeishuClient } from "./feishu-images";
-
 // WKWebView may animate the native scroll view to a tapped input even when
 // overflow is hidden and focus({preventScroll:true}) is used. Hide only the
 // input while transferring focus, before WebKit calculates its reveal scroll.
@@ -15,7 +13,7 @@ export function preventRemoteFocusScroll(root: HTMLElement): () => void {
     lastResize = performance.now();
   };
   const restores = new Map<HTMLElement, () => void>();
-  const supported = () => isFeishuClient() && /iP(?:hone|ad|od)/.test(navigator.userAgent);
+  const supported = () => /iP(?:hone|ad|od)/.test(navigator.userAgent);
   const inputFor = (target: EventTarget | null) => {
     // Search label padding and its icon activate the input too. Resolve the
     // associated control before allowing the label's default focus action.

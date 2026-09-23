@@ -1,3 +1,4 @@
+import { ProjectSyncService } from "../src/modules/project-sync/project-sync-service.js";
 import { CreateTaskCommandSchema } from "@codexboard/contracts";
 import { TEST_FEISHU_ACTOR } from "./helpers/identity.js";
 import { ProjectAdministration } from "../src/modules/project-registry/index.js";
@@ -193,6 +194,7 @@ it("lists without resuming and reads through a Desktop follower only", async () 
   expect(listed.json().data.threads[0].title).toBe("桌面任务");
   const read = await f.app.inject({ url: `/api/v1/remote/threads/${id}`, headers: f.headers });
   expect(read.statusCode).toBe(200);
+  expect(f.request).toHaveBeenLastCalledWith("taskboard/remote/read", { threadId: id }, 120_000);
   expect(f.request.mock.calls.map(([method]) => method)).toEqual([
     "thread/list",
     "taskboard/remote/read",
@@ -222,11 +224,15 @@ it("authenticates read-only file review, validates scopes and forwards only the 
   const list = await f.app.inject({ url, headers: f.headers });
   expect(list.statusCode).toBe(200);
   expect(list.headers["cache-control"]).toBe("no-store");
-  expect(f.request).toHaveBeenLastCalledWith("taskboard/remote/review", {
-    threadId: id,
-    scope: "branch",
-    all: false,
-  });
+  expect(f.request).toHaveBeenLastCalledWith(
+    "taskboard/remote/review",
+    {
+      threadId: id,
+      scope: "branch",
+      all: false,
+    },
+    120_000,
+  );
   f.request.mockResolvedValueOnce({
     file: {
       path: "中文 文件.ts",
@@ -249,13 +255,17 @@ it("authenticates read-only file review, validates scopes and forwards only the 
   });
   expect(file.statusCode).toBe(200);
   expect(file.json().data.patch).toBe("patch");
-  expect(f.request).toHaveBeenLastCalledWith("taskboard/remote/review", {
-    threadId: id,
-    scope: "staged",
-    all: true,
-    path: "中文 文件.ts",
-    view: "file",
-  });
+  expect(f.request).toHaveBeenLastCalledWith(
+    "taskboard/remote/review",
+    {
+      threadId: id,
+      scope: "staged",
+      all: true,
+      path: "中文 文件.ts",
+      view: "file",
+    },
+    120_000,
+  );
   f.database
     .prepare("UPDATE identities SET role = 'member' WHERE identity_key = ?")
     .run(identityKey(TEST_FEISHU_IDENTITY));
@@ -357,6 +367,7 @@ it("a lost reply is not resent and a pending receipt remains blocked after resta
   };
   const failed = await f.app.inject(input);
   expect(failed.statusCode).toBe(409);
+  expect(failed.json().error.code).toBe("REMOTE_RESULT_UNKNOWN");
   expect(failed.body).not.toContain("private diagnostic");
   expect((await f.app.inject(input)).statusCode).toBe(409);
   expect(f.request).toHaveBeenCalledTimes(1);
@@ -671,11 +682,15 @@ it("serves referenced images privately and rejects invalid requests before readi
   expect(response.headers["content-type"]).toBe("image/png");
   expect(response.headers["cache-control"]).toBe("no-store");
   expect(response.headers["x-content-type-options"]).toBe("nosniff");
-  expect(f.request).toHaveBeenCalledWith("taskboard/remote/image", {
-    threadId: id,
-    itemId: "image",
-    imageIndex: 0,
-  });
+  expect(f.request).toHaveBeenCalledWith(
+    "taskboard/remote/image",
+    {
+      threadId: id,
+      itemId: "image",
+      imageIndex: 0,
+    },
+    120_000,
+  );
 });
 
 it("uploads with authentication, CSRF and idempotency and derives attachment ownership server-side", async () => {
@@ -993,4 +1008,107 @@ it("uses the actual attachment request in project titles and follows subsequent 
       preview: "修复对话标题\n更多说明",
     });
   }
+});
+
+it("reports Desktop connection failure as unavailable, not a data conflict", async () => {
+  const f = await setup();
+  f.request.mockRejectedValue(new CodexRequestError(-32001, "private failure"));
+  const response = await f.app.inject({ url: `/api/v1/remote/threads/${id}`, headers: f.headers });
+  expect(response.statusCode).toBe(503);
+  expect(response.body).not.toContain("private failure");
+});
+
+it("inherits Desktop model settings when only standard speed is supplied", async () => {
+  const f = await setup();
+  const response = await f.app.inject({
+    method: "POST",
+    url: `/api/v1/remote/threads/${id}/actions`,
+    headers: f.headers,
+    payload: { type: "send", text: "hello", serviceTier: null },
+  });
+  expect(response.statusCode).toBe(200);
+  expect(f.request.mock.calls.map(([method]) => method)).toEqual(["taskboard/remote/send"]);
+  expect(f.request.mock.calls[0]?.[1]).not.toHaveProperty("model");
+});
+
+it("publishes only Desktop presets while retaining the complete live model list", async () => {
+  const f = await setup();
+  const original = f.request.getMockImplementation()!;
+  f.request.mockImplementation(async (method, params) =>
+    method === "taskboard/remote/model-presets"
+      ? {
+          presets: [
+            { model: "test-model", effort: "medium" },
+            { model: "test-model", effort: "unsupported" },
+          ],
+        }
+      : original(method, params),
+  );
+  const response = await f.app.inject({ url: "/api/v1/remote/models", headers: f.headers });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().data[0]).toMatchObject({
+    id: "test-model",
+    efforts: ["medium"],
+    defaultPresets: [{ effort: "medium", order: 0 }],
+  });
+});
+
+it("maps Desktop project identity after a folder rename and preserves recency across pages", async () => {
+  const f = await setup();
+  const desktopId = randomUUID();
+  new ProjectSyncService({ database: f.database }).reconcile({
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    projects: [
+      { codexProjectId: desktopId, name: "paper", rootPaths: ["/new/paper"], position: 0 },
+    ],
+  });
+  const project = f.database
+    .prepare("SELECT id FROM projects WHERE codex_project_id = ?")
+    .get(desktopId) as { id: string };
+  f.request.mockResolvedValueOnce({
+    data: [
+      {
+        id,
+        name: "paper task",
+        preview: "",
+        cwd: "/old/codex-paper",
+        updatedAt: 999,
+        recencyAt: 12,
+        desktopProjectId: desktopId,
+        desktopOrder: 2,
+      },
+    ],
+    nextCursor: "older",
+  });
+  const result = await f.app.inject({
+    url: "/api/v1/remote/threads?cursor=page-two",
+    headers: f.headers,
+  });
+  expect(result.statusCode).toBe(200);
+  expect(result.json().data).toMatchObject({
+    threads: [{ projectId: project.id, recencyAt: 12, desktopOrder: 2, cwd: "/old/codex-paper" }],
+    nextCursor: "older",
+  });
+  expect(f.request).toHaveBeenLastCalledWith("thread/list", {
+    limit: 50,
+    sortKey: "recency_at",
+    archived: false,
+    cursor: "page-two",
+  });
+  f.request.mockResolvedValueOnce({
+    data: [
+      {
+        id,
+        name: "unassigned",
+        preview: "",
+        cwd: "/new/paper",
+        updatedAt: 999,
+        desktopProjectId: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  const unassigned = await f.app.inject({ url: "/api/v1/remote/threads", headers: f.headers });
+  expect(unassigned.json().data.threads[0]).toMatchObject({ projectId: null, recencyAt: 999 });
 });

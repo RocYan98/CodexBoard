@@ -1,5 +1,5 @@
 import { cleanUserText, remoteDisplayTitle } from "./remote-title.js";
-import { ModelsSchema } from "./model-catalog.js";
+import { readModelCatalog } from "./model-catalog.js";
 import {
   RemoteUploadChunks,
   RemoteChunkQuery,
@@ -37,7 +37,7 @@ import { desktopRemoteView } from "./remote-view.js";
 
 export interface RemoteClient {
   connect(): Promise<void>;
-  request(method: string, params: unknown): Promise<unknown>;
+  request(method: string, params: unknown, timeoutMs?: number): Promise<unknown>;
 }
 const UsageWindow = z.object({
   usedPercent: z.number(),
@@ -62,6 +62,9 @@ const ThreadList = z.object({
       preview: z.string(),
       cwd: z.string(),
       updatedAt: z.number(),
+      recencyAt: z.number().nullish(),
+      desktopProjectId: z.string().nullable().optional(),
+      desktopOrder: z.number().int().optional(),
       status: z.object({ type: z.string() }).optional(),
     }),
   ),
@@ -96,22 +99,41 @@ export function registerRemoteRoutes(
     return session;
   }
   async function rpc(method: string, params: unknown): Promise<unknown> {
-    if (!client) throw new AppError("INVALID_REQUEST", 409, "桌面连接尚未配置");
+    if (!client) throw new AppError("REMOTE_UNAVAILABLE", 503, "桌面连接尚未配置");
     try {
       await client.connect();
-      return await client.request(method, params);
+      // A cold Desktop read may need discovery, a large initial snapshot, and
+      // a confirmed history revision. Mutation deadlines remain unchanged.
+      const reading = [
+        "taskboard/remote/read",
+        "taskboard/remote/image",
+        "taskboard/remote/review",
+      ].includes(method);
+      return await (reading
+        ? client.request(method, params, 120_000)
+        : client.request(method, params));
     } catch (error) {
       if (error instanceof CodexRequestError && error.code === -32002)
         throw new AppError("INVALID_REQUEST", 409, error.message);
       throw new AppError(
-        "INVALID_REQUEST",
-        409,
+        "REMOTE_UNAVAILABLE",
+        503,
         "桌面连接不可用或操作结果尚未确认，请刷新核实；不会自动重发",
       );
     }
   }
-  async function models() {
-    const result = ModelsSchema.parse(await rpc("model/list", { limit: 100 }));
+  async function models(includeDefaults = false) {
+    const result = await readModelCatalog(rpc);
+    const defaults = includeDefaults
+      ? await rpc("taskboard/remote/model-presets", { models: result.data })
+          .then(
+            (value) =>
+              z
+                .object({ presets: z.array(z.object({ model: z.string(), effort: z.string() })) })
+                .parse(value).presets,
+          )
+          .catch(() => [])
+      : [];
     return result.data
       .filter((m) => !m.hidden)
       .map((m) =>
@@ -120,6 +142,13 @@ export function registerRemoteRoutes(
           name: m.displayName,
           efforts: m.supportedReasoningEfforts.map((e) => e.reasoningEffort),
           defaultEffort: m.defaultReasoningEffort,
+          isDefault: m.isDefault,
+          defaultPresets: defaults.flatMap((p, order) =>
+            p.model === m.model &&
+            m.supportedReasoningEfforts.some((e) => e.reasoningEffort === p.effort)
+              ? [{ effort: p.effort, order }]
+              : [],
+          ),
           serviceTiers: m.serviceTiers,
         }),
       );
@@ -158,11 +187,20 @@ export function registerRemoteRoutes(
     const result = ThreadList.parse(
       await rpc("thread/list", {
         limit: 50,
-        sortKey: "updated_at",
+        sortKey: "recency_at",
         archived: false,
         ...(query.cursor ? { cursor: query.cursor } : {}),
         ...(query.search ? { searchTerm: query.search } : {}),
       }),
+    );
+    const projectIds = new Map(
+      (
+        options.database
+          .prepare(
+            "SELECT id, codex_project_id AS desktopId FROM projects WHERE source_kind = 'codex' AND sync_deleted_at IS NULL",
+          )
+          .all() as { id: string; desktopId: string }[]
+      ).map((project) => [project.desktopId, project.id]),
     );
     return {
       data: RemoteThreadListSchema.parse({
@@ -172,6 +210,16 @@ export function registerRemoteRoutes(
           preview: cleanUserText(thread.preview).slice(0, 300),
           cwd: thread.cwd,
           updatedAt: thread.updatedAt,
+          recencyAt: thread.recencyAt ?? thread.updatedAt,
+          ...(thread.desktopProjectId !== undefined
+            ? {
+                projectId:
+                  thread.desktopProjectId === null
+                    ? null
+                    : (projectIds.get(thread.desktopProjectId) ?? null),
+              }
+            : {}),
+          desktopOrder: thread.desktopOrder,
           status: thread.status?.type ?? "unknown",
         })),
         nextCursor: result.nextCursor,
@@ -207,7 +255,7 @@ export function registerRemoteRoutes(
   });
   app.get("/api/v1/remote/models", async (request) => {
     authenticate(request);
-    return { data: await models() };
+    return { data: await models(true) };
   });
   const uploadChunks = new RemoteUploadChunks();
   app.post(
@@ -358,7 +406,7 @@ export function registerRemoteRoutes(
       data: await mutate(request, { threadId, action }, async (key) => {
         if (
           action.type === "send" &&
-          (action.model || action.effort || action.serviceTier !== undefined)
+          (action.model || action.effort || action.serviceTier != null)
         ) {
           const available = await models();
           const selected = action.model ? available.find((m) => m.id === action.model) : undefined;

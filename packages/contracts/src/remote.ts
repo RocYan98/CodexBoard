@@ -7,6 +7,9 @@ export const RemoteThreadSummarySchema = z.object({
   preview: z.string(),
   cwd: z.string(),
   updatedAt: z.number(),
+  recencyAt: z.number().optional(),
+  projectId: z.string().nullable().optional(),
+  desktopOrder: z.number().int().optional(),
   status: z.string(),
 });
 export const RemoteThreadListSchema = z.object({
@@ -128,6 +131,10 @@ export const RemoteModelSchema = z.object({
   name: z.string(),
   efforts: z.array(z.string()),
   defaultEffort: z.string(),
+  isDefault: z.boolean().optional(),
+  defaultPresets: z
+    .array(z.object({ effort: z.string(), order: z.number().int().nonnegative() }))
+    .optional(),
   serviceTiers: z
     .array(z.object({ id: z.string(), name: z.string(), description: z.string().nullish() }))
     .default([]),

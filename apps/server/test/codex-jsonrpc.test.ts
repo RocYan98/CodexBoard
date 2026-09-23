@@ -135,8 +135,12 @@ describe("Codex JSON-RPC client", () => {
 
       const timedOut = client.request("thread/read", { threadId: "thread-1" });
       const timeoutAssertion = expect(timedOut).rejects.toThrow(/timed out/);
+      const largeRead = client.request("taskboard/remote/read", { threadId: "old" }, 500);
+      const largeReadId = (transport.sent.at(-1) as { id: number }).id;
       await vi.advanceTimersByTimeAsync(101);
       await timeoutAssertion;
+      transport.receive({ id: largeReadId, result: { id: "old" } });
+      await expect(largeRead).resolves.toEqual({ id: "old" });
 
       transport.receive({ hello: "world" });
       expect(protocolErrors).toHaveLength(1);

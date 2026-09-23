@@ -1,6 +1,6 @@
 import { desktopUserEvent } from "./desktop-user-events.js";
 import type { TaskModelOptions } from "@codexboard/contracts";
-import { ModelsSchema } from "../codex/model-catalog.js";
+import { readModelCatalog } from "../codex/model-catalog.js";
 import { AppError } from "../../app-error.js";
 import type { InteractionDecision } from "@codexboard/contracts";
 import { randomUUID } from "node:crypto";
@@ -162,7 +162,9 @@ export class AppServerCodexExecutor implements CodexExecutor, CodexThreadProvisi
     await this.#client.connect();
     const modelOptions = input.modelOptions;
     if (modelOptions) {
-      const catalog = ModelsSchema.parse(await this.#client.request("model/list", { limit: 100 }));
+      const catalog = await readModelCatalog((method, params) =>
+        this.#client.request(method, params),
+      );
       const selected = catalog.data.find(
         (model) => !model.hidden && model.model === modelOptions.model,
       );

@@ -126,6 +126,48 @@ test("remote first read never exposes an old snapshot when synchronization fails
   );
 });
 
+test("slow snapshots use a separate deadline from small discovery requests", async (t) => {
+  const f = await fixture(t, { timeoutMs: 100, snapshotDelayMs: 200, snapshotTimeoutMs: 1000 });
+  const state = await f.session.request("taskboard/remote/read", { threadId: "thread-a" });
+  assert.equal(state.id, "thread-a");
+});
+
+test("old conversations with large tool images connect without forwarding embedded media", async (t) => {
+  const data = "a".repeat(33 * 1024 * 1024);
+  const f = await fixture(t, {
+    canonical: true,
+    initialState: {
+      turns: [
+        {
+          turnId: "old",
+          status: "completed",
+          items: [
+            {
+              id: "screenshot",
+              type: "mcpToolCall",
+              result: {
+                content: [
+                  { type: "text", text: "窗口已打开" },
+                  { type: "image", mimeType: "image/png", data },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const state = await f.session.request("taskboard/remote/read", { threadId: "thread-a" });
+  const content = state.turnHistory.history.entitiesByKey["turn:old"].items[0].result.content;
+  assert.equal(content[0].text, "窗口已打开");
+  assert.equal(content[1].data, "");
+  assert.ok(JSON.stringify(state).length < 10000);
+  assert.equal(
+    f.requests.some((r) => /resume|start-turn|interrupt/.test(r.method)),
+    false,
+  );
+});
+
 test("remote steering stays on the running owner and does not start, interrupt or resume", async (t) => {
   const f = await fixture(t, {
     initialState: { turns: [{ turnId: "running", status: "inProgress", items: [] }] },
@@ -565,9 +607,12 @@ async function fixture(
     rejectClientId = "owner",
     dropMethod,
     timeoutMs = 1000,
+    discoveryTimeoutMs = 1000,
     initialState = {},
     hydratedState,
     historyDelayMs = 0,
+    snapshotDelayMs = 0,
+    snapshotTimeoutMs = 1000,
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "desktop-session-"));
@@ -637,7 +682,8 @@ async function fixture(
         if (m.type === "broadcast") {
           if (m.method === "thread-stream-following-changed" && m.params.following) {
             follower = m.sourceClientId;
-            snapshot(initialState);
+            if (snapshotDelayMs) setTimeout(() => snapshot(initialState), snapshotDelayMs);
+            else snapshot(initialState);
           }
           continue;
         }
@@ -720,6 +766,8 @@ async function fixture(
     onMessage: (m) => messages.push(m),
     onDisconnect: (turnId) => disconnects.push(turnId),
     timeoutMs,
+    discoveryTimeoutMs,
+    snapshotTimeoutMs,
   });
   t.after(() => session.stop());
   return {
@@ -1506,3 +1554,12 @@ for (const method of ["taskboard/remote/send", "turn/start"]) {
     });
   }
 }
+
+test("a missing-owner probe expires quickly and is safe to load, not an uncertain turn", async (t) => {
+  const started = Date.now();
+  await assert.rejects(
+    fixture(t, { dropMethod: "thread-owner-discovery", discoveryTimeoutMs: 30 }),
+    (e) => e.rpcError?.code === -32001,
+  );
+  assert.ok(Date.now() - started < 1000);
+});

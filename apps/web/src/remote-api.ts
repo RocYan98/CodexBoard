@@ -22,11 +22,12 @@ export async function listRemoteThreads(search: string, cursor?: string) {
     await apiRequest(`/api/v1/remote/threads?${query}`, z.object({ data: RemoteThreadListSchema }))
   ).data;
 }
-export async function readRemoteThread(id: string) {
+export async function readRemoteThread(id: string, signal?: AbortSignal) {
   return (
     await apiRequest(
       `/api/v1/remote/threads/${encodeURIComponent(id)}`,
       z.object({ data: RemoteThreadSchema }),
+      { signal: AbortSignal.any([AbortSignal.timeout(125_000), ...(signal ? [signal] : [])]) },
     )
   ).data;
 }

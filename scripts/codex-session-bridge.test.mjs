@@ -86,12 +86,15 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 let lock, thread;
 const loaded = new Set();
+const catalogPath = ${JSON.stringify(join(directory, "catalog.json"))};
+const catalog = fs.existsSync(catalogPath) ? JSON.parse(fs.readFileSync(catalogPath, "utf8")) : [];
 const events = ${JSON.stringify(join(directory, "archive-events.log"))};
 const record = event => fs.appendFileSync(events, event+'\\n');
 const send = m => process.stdout.write(JSON.stringify(m)+'\\n');
 readline.createInterface({input:process.stdin}).on('line', line => {
  const m=JSON.parse(line); if (!('id' in m)) return;
  if(m.method) fs.appendFileSync(${JSON.stringify(join(directory, "helper-methods.log"))},m.method+'\\n');
+ if(m.method==='model/list') return send({id:m.id,result:{data:catalog,nextCursor:null}});
  if(m.method==='config/read') {
   const reviewer = {'/auto':'auto_review','/ask':'user','/legacy':'guardian_subagent','/invalid':'bad'}[m.params.cwd];
   if(m.params.cwd==='/config-error') return send({id:m.id,error:{code:-32603,message:'config unavailable'}});
@@ -304,6 +307,18 @@ process.stdin.on('end',finish);
       rateLimits: { secondary: { usedPercent: 37 } },
     });
     socket.send(JSON.stringify({ method: "initialized" }));
+    const connectionsBeforeModels = desktopConnections;
+    writeFileSync(join(directory, "catalog.json"), JSON.stringify([{ model: "gpt-6-sol" }]));
+    assert.deepEqual((await request("model/list", { limit: 100 })).data, [{ model: "gpt-6-sol" }]);
+    writeFileSync(join(directory, "catalog.json"), JSON.stringify([{ model: "future-model" }]));
+    assert.deepEqual((await request("model/list", { limit: 100 })).data, [
+      { model: "future-model" },
+    ]);
+    assert.equal(
+      desktopConnections,
+      connectionsBeforeModels,
+      "catalog reads never acquire a Desktop thread",
+    );
     const videoBytes = 13 * 1024 * 1024;
     const uploadedVideo = await request("taskboard/remote/upload", {
       ownerKey: "a".repeat(64),

@@ -52,6 +52,7 @@ const desktop = fork(resolve("scripts/fake-codex-desktop.mjs"), [], {
   env: {
     ...testEnvironment,
     FAKE_CODEX_HOME: fakeCodexHome,
+    CODEX_ELECTRON_USER_DATA_PATH: join(fakeCodexHome, "desktop-settings"),
     FAKE_CODEX_INTERRUPT_DELAY_MS: "1500",
   },
   stdio: ["ignore", "inherit", "inherit", "ipc"],
@@ -70,6 +71,7 @@ try {
       env: {
         ...testEnvironment,
         FAKE_CODEX_HOME: fakeCodexHome,
+        CODEX_ELECTRON_USER_DATA_PATH: join(fakeCodexHome, "desktop-settings"),
         CODEXBOARD_ENV: "test",
         CODEXBOARD_AUTH_MODE: "development",
         CODEXBOARD_HOST: "127.0.0.1",

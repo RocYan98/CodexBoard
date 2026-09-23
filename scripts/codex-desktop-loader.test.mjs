@@ -97,8 +97,51 @@ test("loading failure is bounded and does not expose native diagnostics", async 
   );
 });
 
+test("does not reopen a discovered owner when its large snapshot times out", async () => {
+  let attempts = 0;
+  await assert.rejects(
+    loadDesktopSession({
+      threadId,
+      connector: async ({ connectTimeoutMs, snapshotTimeoutMs }) => {
+        attempts++;
+        assert.ok(snapshotTimeoutMs > connectTimeoutMs);
+        throw Object.assign(new Error("history timeout"), { rpcError: { code: -32003 } });
+      },
+      opener: () => assert.fail("must not restart the same snapshot by opening Desktop"),
+    }),
+    /history timeout/,
+  );
+  assert.equal(attempts, 1);
+});
+
 test("rejects nonpersistent ids before opening an application", async () => {
   await assert.rejects(openDesktopThread("x; touch /tmp/invalid"), /编号/);
+});
+
+test("a short discovery probe loads once without shortening the snapshot deadline", async () => {
+  let attempts = 0,
+    opens = 0;
+  const session = {};
+  const started = Date.now();
+  const result = await loadDesktopSession({
+    threadId,
+    discoveryTimeoutMs: 30,
+    connector: async ({ discoveryTimeoutMs, snapshotTimeoutMs }) => {
+      assert.ok(snapshotTimeoutMs > discoveryTimeoutMs);
+      if (++attempts === 1) {
+        await new Promise((r) => setTimeout(r, discoveryTimeoutMs));
+        throw unavailable();
+      }
+      return session;
+    },
+    opener: async () => {
+      opens++;
+    },
+    retryMs: 1,
+  });
+  assert.equal(result, session);
+  assert.equal(opens, 1);
+  assert.ok(Date.now() - started < 1000);
 });
 
 test("Windows opens only the validated deep link without a command shell or a new turn", async () => {

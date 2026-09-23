@@ -12,6 +12,8 @@ export function WebLoginForm({ enabled }: { readonly enabled: boolean }) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (pending) return;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     setPending(true);
     setError("");
     try {

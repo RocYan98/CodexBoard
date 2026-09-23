@@ -330,7 +330,7 @@ export function TaskCreateDialog({
         task = await createTask(
           {
             projectId: targetProjectId,
-            ...(modelOptions
+            ...(modelOptions?.model && modelOptions.effort
               ? {
                   modelOptions: {
                     model: modelOptions.model,
@@ -935,7 +935,7 @@ export function TaskCreateDialog({
                     <RemoteEffortGauge effort={modelOptions?.effort} />
                     <span>
                       {modelOptions
-                        ? `${queryClient.getQueryData<RemoteModel[]>(["remote-models"])?.find((model) => model.id === modelOptions.model)?.name ?? modelOptions.model} · ${effortLabels[modelOptions.effort] ?? modelOptions.effort}${modelOptions.serviceTier ? " · 加速" : ""}`
+                        ? `${queryClient.getQueryData<RemoteModel[]>(["remote-models"])?.find((model) => model.id === modelOptions.model)?.name ?? modelOptions.model} · ${effortLabels[modelOptions.effort ?? ""] ?? modelOptions.effort}${modelOptions.serviceTier ? " · 加速" : ""}`
                         : "Codex 默认模型"}
                     </span>
                   </button>

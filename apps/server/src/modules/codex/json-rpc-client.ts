@@ -124,11 +124,11 @@ export class CodexJsonRpcClient {
     return this.#connectPromise;
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (this.#state !== "connected") {
       return Promise.reject(new CodexProtocolError("Codex client is not connected"));
     }
-    return this.#requestRaw(method, params);
+    return this.#requestRaw(method, params, timeoutMs);
   }
 
   notify(method: string, params: unknown): Promise<void> {
@@ -174,13 +174,17 @@ export class CodexJsonRpcClient {
     await this.#transport.close();
   }
 
-  #requestRaw(method: string, params: unknown): Promise<unknown> {
+  #requestRaw(
+    method: string,
+    params: unknown,
+    timeoutMs = this.#requestTimeoutMs,
+  ): Promise<unknown> {
     const id = this.#nextRequestId++;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(id);
         reject(new CodexProtocolError(`Codex request timed out: ${method}`));
-      }, this.#requestTimeoutMs);
+      }, timeoutMs);
       this.#pending.set(id, { method, resolve, reject, timeout });
       void this.#transport.send({ id, method, params }).catch((error: unknown) => {
         const pending = this.#pending.get(id);

@@ -33,8 +33,9 @@ export async function openDesktopThread(
 export async function loadDesktopSession({
   connector = connectDesktopSession,
   opener = openDesktopThread,
-  timeoutMs = 20_000,
-  retryMs = 250,
+  timeoutMs = 45_000,
+  retryMs = 100,
+  discoveryTimeoutMs = 750,
   signal,
   ...options
 }) {
@@ -51,9 +52,16 @@ export async function loadDesktopSession({
           1,
           Math.min(5000, Math.floor((deadline - performance.now()) / 3)),
         ),
+        // Discovery is read-only: a short probe can safely fall through to
+        // one explicit load. Snapshot and mutation deadlines stay independent.
+        discoveryTimeoutMs: Math.max(1, Math.min(discoveryTimeoutMs, deadline - performance.now())),
+        snapshotTimeoutMs: Math.max(1, Math.min(30_000, deadline - performance.now())),
       });
-    } catch {
+    } catch (error) {
       if (lifetime.aborted) break;
+      // An owner that is already transmitting a large snapshot must not be
+      // reopened repeatedly, restarting the same expensive transfer.
+      if (error.rpcError?.code === -32003) throw error;
       if (!opened) {
         try {
           await opener(options.threadId, {

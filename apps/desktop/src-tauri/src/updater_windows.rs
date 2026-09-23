@@ -1,10 +1,10 @@
-// The Windows test installer does not share the macOS tar replacement protocol.
+// The Windows installer does not share the macOS tar replacement protocol.
 // Keep updates explicit until a signed Windows updater channel is published.
 use serde_json::{json, Value};
 use std::path::Path;
 use tauri::Manager;
 
-const MESSAGE: &str = "Windows 测试版请下载新的 Windows 安装包升级；当前不支持应用内自动更新。";
+const MESSAGE: &str = "Windows 版请下载新的 Windows 安装包升级；当前不支持应用内自动更新。";
 pub struct Updates {
     version: String,
 }

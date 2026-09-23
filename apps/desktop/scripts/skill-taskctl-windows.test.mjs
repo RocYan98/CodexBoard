@@ -13,7 +13,7 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "codexboard-wrapper-win-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const local = join(root, "Local App Data");
-  const app = join(local, "CodexBoard Windows Test");
+  const app = join(local, "CodexBoard Desktop");
   const node = join(app, "runtime/bin/node.exe");
   const cli = join(app, "runtime/packages/taskctl/dist/cli.js");
   mkdirSync(dirname(node), { recursive: true });

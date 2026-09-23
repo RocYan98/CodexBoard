@@ -25,10 +25,10 @@ try {
             Fail-Board 'CODEXBOARD_APP_PATH must name an absolute, complete Windows installation.'
         }
     } else {
-        # tauri.windows.conf.json: currentUser + productName CodexBoard Windows Test.
+        # tauri.windows.conf.json: currentUser + productName CodexBoard Desktop.
         foreach ($base in @($env:LOCALAPPDATA, $env:ProgramW6432, $env:ProgramFiles)) {
             if ([string]::IsNullOrWhiteSpace($base)) { continue }
-            $candidate = [IO.Path]::Combine($base, 'CodexBoard Windows Test')
+            $candidate = [IO.Path]::Combine($base, 'CodexBoard Desktop')
             if (Has-BoardCli $candidate) { $boardApp = $candidate; break }
         }
         if (-not $boardApp) { Fail-Board 'Windows installation not found. Set CODEXBOARD_APP_PATH for a custom install directory.' }

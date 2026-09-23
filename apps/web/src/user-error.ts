@@ -8,6 +8,9 @@ export function userErrorMessage(error: unknown, fallback = "操作失败，请�
   )
     return "网络连接中断，请检查网络后重试。";
   if (error instanceof ApiError) {
+    if (error.code === "REMOTE_UNAVAILABLE") return "暂时无法连接桌面对话，请检查 Desktop 后重试。";
+    if (error.code === "REMOTE_RESULT_UNKNOWN")
+      return "上次操作结果尚未确认，请先查看对话或任务列表核实，避免重复发送。";
     switch (error.status) {
       case 401:
         return "登录已失效，请重新登录。";

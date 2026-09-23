@@ -8,13 +8,7 @@ import {
   type PointerEvent,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  defaultRemotePresets,
-  effortLabels,
-  DEFAULT_REMOTE_MODEL,
-  DEFAULT_REMOTE_EFFORT,
-  type ComposerOptions,
-} from "./remote-composer-model";
+import { defaultRemotePresets, effortLabels, type ComposerOptions } from "./remote-composer-model";
 import { listRemoteModels } from "./remote-api";
 import { RemoteNotice } from "./remote-notice";
 import { RemoteSpeedIcon, RemoteSpeedParticles } from "./remote-speed-icon";
@@ -56,7 +50,8 @@ export function RemoteModelSettings({
     queryFn: listRemoteModels,
     enabled: menu === "model" || menu === "models",
     retry: false,
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   useLayoutEffect(() => {
     const panel = menu === "models" ? listPanel.current : simplePanel.current;
@@ -73,21 +68,36 @@ export function RemoteModelSettings({
     (!options.model || selected?.id === currentModel ? currentEffort : undefined) ??
     selected?.defaultEffort;
   const isDefault = options.selectionMode === "default";
-  const defaultAvailable = models.data?.some(
-    (model) => model.id === DEFAULT_REMOTE_MODEL && model.efforts.includes(DEFAULT_REMOTE_EFFORT),
-  );
-  const resetDefault = () =>
+  const desktopPresets = defaultRemotePresets(models.data ?? []);
+  const catalogDefault = models.data?.find((model) => model.isDefault);
+  const defaultPreset =
+    desktopPresets.find(
+      (p) => p.model === catalogDefault?.id && p.effort === catalogDefault.defaultEffort,
+    ) ??
+    desktopPresets.find((p) => p.model === catalogDefault?.id && p.effort === "medium") ??
+    desktopPresets.find((p) => p.effort === "medium") ??
+    desktopPresets[0];
+  const defaultAvailable = Boolean(defaultPreset);
+  const resetDefault = () => {
+    if (!defaultPreset) return;
     onOptions({
       ...options,
-      model: DEFAULT_REMOTE_MODEL,
-      effort: DEFAULT_REMOTE_EFFORT,
+      ...defaultPreset,
       selectionMode: "default",
       serviceTier: models.data
-        ?.find((model) => model.id === DEFAULT_REMOTE_MODEL)
-        ?.serviceTiers.some((tier) => tier.id === options.serviceTier)
+        ?.find((m) => m.id === defaultPreset.model)
+        ?.serviceTiers.some((t) => t.id === options.serviceTier)
         ? options.serviceTier
         : null,
     });
+  };
+  useEffect(() => {
+    if (!models.data || !isDefault) return;
+    if (desktopPresets.some((p) => p.model === options.model && p.effort === options.effort))
+      return;
+    if (defaultPreset) onOptions({ ...options, ...defaultPreset, serviceTier: null });
+    else onOptions({ ...options, selectionMode: "model" });
+  }, [models.data, isDefault, options, onOptions, desktopPresets, defaultPreset]);
   const speedTiers = selected?.serviceTiers ?? [];
   const speedTier = speedTiers.find((tier) => tier.id === options.serviceTier);
   const fastTier = speedTiers.find(
@@ -95,11 +105,9 @@ export function RemoteModelSettings({
   );
   const shownTier = speedTier ?? fastTier;
   const speedLabel =
-    shownTier === fastTier && fastTier
-      ? selected?.id === DEFAULT_REMOTE_MODEL
-        ? "2× speed"
-        : "1.5× speed"
-      : (shownTier?.name ?? "倍速不可用");
+    shownTier?.description?.match(/^[\d.]+[x×] speed/i)?.[0]?.replace("x", "×") ??
+    shownTier?.name ??
+    "倍速不可用";
   const cycleSpeed = () => {
     const index = speedTiers.findIndex((tier) => tier.id === options.serviceTier);
     onOptions({ ...options, serviceTier: speedTiers[index + 1]?.id ?? null });
@@ -187,7 +195,10 @@ export function RemoteModelSettings({
                   }}
                 >
                   <span>
-                    Default<small>推荐模型组合</small>
+                    Default
+                    <small>
+                      {defaultAvailable ? "Desktop 推荐模型组合" : "Desktop 推荐档位暂不可用"}
+                    </small>
                   </span>
                   {isDefault && <SfSymbol name="checkmark" />}
                 </button>
@@ -240,7 +251,7 @@ export function RemoteModelSettings({
                 <button type="button" aria-label="选择模型" onClick={() => setMenu("models")}>
                   <strong key={`${options.model}:${effort}:${isDefault}`}>
                     {isDefault
-                      ? `${selected?.name ?? "GPT-6 Astra"} ${effortLabels[effort ?? ""] ?? effort ?? ""}`
+                      ? `${selected?.name ?? "Desktop 默认"} ${effortLabels[effort ?? ""] ?? effort ?? ""}`
                       : (effortLabels[effort ?? ""] ?? effort ?? "选择档位")}{" "}
                     <SfSymbol name="chevron.right" />
                   </strong>

@@ -4,7 +4,7 @@
 
 本指南仅在**用户请求安装、配置、排障或使用 CodexBoard** 时适用。读取本文件本身不触发安装、配置修改或任务执行，也不要求处理源码的 Agent 先安装应用；既有上级及宿主规则继续适用。
 
-以下操作针对已发布的 macOS 应用，无需克隆源码或安装开发环境。命令与界面以实际安装版本为准；命令不匹配时先按第 5 节定位包装器并查看帮助，不要猜测接口。
+以下操作针对已发布的 macOS / Windows 应用，无需克隆源码或安装开发环境。命令与界面以实际安装版本为准；命令不匹配时先按第 5 节定位包装器并查看帮助，不要猜测接口。
 
 ## 1. 执行边界
 
@@ -16,7 +16,9 @@
 
 ## 2. 确认设备、版本和已有安装
 
-当前发布包适用于 **Apple Silicon（arm64）、macOS 13 或更新版本**，不适用于 Intel Mac 或 Windows。读取：
+1.0.0 提供 **macOS arm64** 与 **Windows x64** 包，不支持 Intel Mac、Windows arm64 或 Linux。macOS 要求 13 或更新版本；Windows 在 Server 2022 验证，Windows 11 实机与真实业务任务尚未验证。先按当前系统选择检查与安装流程。
+
+macOS 读取：
 
 ```sh
 uname -m
@@ -58,7 +60,15 @@ sw_vers -productVersion
 
 当前版本使用本地 ad-hoc 签名，尚无 Developer ID 签名及 Apple 公证。若 macOS 拦截，说明当前状态与实际提示，请用户在确认来源后通过系统「隐私与安全性」处理首次打开。此系统安全决定交给用户；不要自动清除 quarantine、关闭 Gatekeeper 或执行绕过系统保护的命令。若系统报告恶意软件或文件损坏，应停止并核对原包，不能把所有拦截都归因于未公证。
 
-### 应用内更新
+### Windows 安装与升级
+
+- 使用 PowerShell `[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture` 确认 x64；从同一 Release 下载 `CodexBoard-1.0.0-windows-x64-setup.exe` 及 `.sha256`，用 `Get-FileHash -Algorithm SHA256` 比较，失败停止。
+- 正常退出旧 CodexBoard，保留 `%LOCALAPPDATA%\CodexBoard` 数据目录。运行完整 NSIS 安装器，默认程序目录 `%LOCALAPPDATA%\CodexBoard Desktop` 与数据目录分离。旧 Windows Test 程序需退出，新版沿用原数据；不启动第二套服务，不接管 Codex Desktop。
+- WebView2 可由安装器下载。当前没有 Authenticode 签名；系统安全决定由用户处理，不关闭 Defender、SmartScreen 或修改 PowerShell 执行策略。
+- Windows 通过下载新版安装器升级，不能使用 macOS `.app.tar.gz` 或 macOS 更新替换流程。
+- Agent Skill 的 Windows 入口为同目录 `scripts/taskctl.ps1`（cmd 可用 `taskctl.cmd`），默认探测 `%LOCALAPPDATA%\CodexBoard Desktop`。自定义安装目录使用 `CODEXBOARD_APP_PATH`；数据目录默认 `%LOCALAPPDATA%\CodexBoard\data`。首次只读检查运行 `& $TASKCTL --help`、`& $TASKCTL health`、`& $TASKCTL auth status`；业务操作仍须完成第 6 节用户配对。
+
+### macOS 应用内更新
 
 已有版本可通过「应用设置 → 应用更新」或菜单栏「检查更新…」检查版本，读取更新说明后按用户授权下载。下载过程会验签；只有确认「安装并重启」才会停止本机服务并替换应用。先处理正在执行的任务和未保存配置，不能把“检查更新”的授权当作“现在重启”的授权。
 

@@ -80,3 +80,45 @@ test("reopening a conversation waits for fresh data instead of rendering cached 
   await expect(page.getByText("最新消息", { exact: true })).toBeVisible();
   await expect(page.getByText("缓存里的旧消息", { exact: true })).toHaveCount(0);
 });
+
+test("a failed Desktop connection stops polling and can be retried explicitly", async ({
+  page,
+}) => {
+  const id = "99999999-9999-4999-8999-999999999999";
+  let reads = 0;
+  let succeed = false;
+  await page.route(`**/api/v1/remote/threads/${id}`, async (route) => {
+    reads++;
+    if (!succeed)
+      return route.fulfill({
+        status: 503,
+        json: { error: { code: "REMOTE_UNAVAILABLE", message: "private diagnostic" } },
+      });
+    return route.fulfill({
+      json: {
+        data: {
+          id,
+          title: "恢复连接",
+          cwd: "/project",
+          model: "test",
+          effort: "medium",
+          status: "idle",
+          activeTurnId: null,
+          historyComplete: true,
+          requests: [],
+          turns: [],
+        },
+      },
+    });
+  });
+  await page.goto(`/?remote=1&remoteThread=${id}`);
+  await expect(page.getByText("暂时无法连接桌面对话，请检查 Desktop 后重试。")).toBeVisible();
+  const initialReads = reads;
+  await page.waitForTimeout(2500);
+  expect(reads).toBe(initialReads);
+  await expect(page.getByText("正在连接桌面对话…", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("数据已更新，请刷新后重试。")).toHaveCount(0);
+  succeed = true;
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "有什么需要帮忙？" })).toBeVisible();
+});

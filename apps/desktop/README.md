@@ -129,3 +129,9 @@ codesign --verify --deep --strict "apps/desktop/dist/CodexBoard.app"
 应用设置的「应用更新」提供「前往 Release 手动下载」链接，用默认浏览器打开最新发布页；自动检查或下载失败时仍可使用。
 
 应用更新支持系统代理及环境代理；可在「更新下载代理」临时填写 HTTP、HTTPS、SOCKS5 或 SOCKS5h 地址（例如 `http://127.0.0.1:7890`），留空恢复自动选择。该字段仅本次应用窗口会话有效，不落盘，不支持含账号密码的地址；检查更新和下载均在发起时使用当前输入。菜单栏检查更新使用自动代理。系统代理自动读取不代表支持浏览器扩展或 PAC 脚本，遇到此类配置可填写实际代理监听地址。下载继续由官方更新插件验签。
+
+## 1.0.0 Windows x64 发布
+
+通过 `npm run build:desktop:windows` 在 Windows x64 构建 NSIS 安装器。两端打包同一套 Web、服务器、桥接与技能代码。Windows CI 执行六套测试、Rust 编译、内置后端冒烟以及完整安装包构建。默认安装目录 `%LOCALAPPDATA%\CodexBoard Desktop`，数据目录 `%LOCALAPPDATA%\CodexBoard`。Windows 当前仅支持下载安装器升级，未启用 macOS tar 更新协议，也没有 Authenticode 签名。
+
+正式包 `CodexBoard-1.0.0-windows-x64-setup.exe` 及 SHA-256 与 macOS DMG、签名更新包一同发布。构建和安装曾在 Server 2022 验证；Windows 11 与真实任务执行需单独验收。

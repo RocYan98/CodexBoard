@@ -20,3 +20,12 @@ it("explains actionable status codes using controlled copy", () => {
   );
   expect(userErrorMessage(new ApiError(409, "CONFLICT", "raw"))).toBe("数据已更新，请刷新后重试。");
 });
+
+it("distinguishes Desktop connection and unconfirmed operation errors from stale data", () => {
+  expect(userErrorMessage(new ApiError(503, "REMOTE_UNAVAILABLE", "private"))).toBe(
+    "暂时无法连接桌面对话，请检查 Desktop 后重试。",
+  );
+  expect(userErrorMessage(new ApiError(409, "REMOTE_RESULT_UNKNOWN", "private"))).toContain(
+    "结果尚未确认",
+  );
+});

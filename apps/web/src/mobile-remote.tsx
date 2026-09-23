@@ -1,3 +1,4 @@
+import { remoteProjectOwner, compareRemoteThreads, remoteRecency } from "./remote-thread-order";
 import { RemoteAsyncQuestions, RemoteEditMessage } from "./remote-message-actions";
 import { installKeyboardDiagnostics } from "./remote-keyboard-diagnostics";
 import { preventRemoteFocusScroll } from "./remote-focus-scroll";
@@ -241,7 +242,10 @@ function RemotePage({
       // applying it here moves the entire page down a second time.
       const nativeKeyboard = isFeishuClient() && /iP(?:hone|ad|od)/.test(navigator.userAgent);
       const fitted = fitRemoteViewport(
-        { top: bounds.top, bottom: bounds.bottom },
+        {
+          top: bounds.top,
+          bottom: nativeKeyboard ? bounds.bottom : Math.max(bounds.bottom, viewport.height),
+        },
         { offsetTop: editing && !nativeKeyboard ? viewport.offsetTop : 0, height: viewport.height },
       );
       page.current?.style.setProperty("--remote-top", `${fitted.top}px`);
@@ -349,20 +353,19 @@ function RemotePage({
   }));
   const recent = { id: "", label: "最近", items: [] as RemoteThreadSummary[] };
   for (const thread of all) {
-    const owner = availableProjects
-      .flatMap((project) =>
-        project.rootPaths.map((root) => ({
-          id: project.id,
-          root: root.replace(/\/$/, ""),
-        })),
-      )
-      .filter(({ root }) => thread.cwd === root || thread.cwd.startsWith(`${root}/`))
-      .sort((a, b) => b.root.length - a.root.length)[0];
-    (groups.find((group) => group.id === owner?.id) ?? recent).items.push(thread);
+    const owner = remoteProjectOwner(thread, availableProjects);
+    (groups.find((group) => group.id === owner) ?? recent).items.push(thread);
   }
+  for (const group of [...groups, recent]) group.items.sort(compareRemoteThreads);
   const orderedGroups =
     organization === "time"
-      ? [{ id: "", label: "最近任务", items: [...all].sort((a, b) => b.updatedAt - a.updatedAt) }]
+      ? [
+          {
+            id: "",
+            label: "最近任务",
+            items: [...all].sort((a, b) => remoteRecency(b) - remoteRecency(a)),
+          },
+        ]
       : organization === "recent"
         ? [recent, ...groups]
         : [...groups, recent];
@@ -633,15 +636,40 @@ function NewRemoteTask({
   const [draft, setDraft] = useRemoteDraft("new");
   const [composerOptions, setComposerOptions] = useRemoteComposerOptions("new");
   const key = useRef(createUuid());
+  const [createdThread, setCreatedThread] = useState<{ threadId: string } | null>(null);
+  const sendReceipt = useRef({ fingerprint: "", key: createUuid() });
   const create = useMutation({
-    mutationFn: () => createRemoteThread(project || null, csrf, key.current),
+    mutationFn: async () => {
+      const result =
+        createdThread ?? (await createRemoteThread(project || null, csrf, key.current));
+      setCreatedThread(result);
+      if (draft.trim() || composerOptions.attachments.length) {
+        const action: RemoteAction = {
+          type: "send",
+          text: draft.trim(),
+          approvalMode: composerOptions.approvalMode,
+          model: composerOptions.model,
+          effort: composerOptions.effort,
+          serviceTier: composerOptions.serviceTier,
+          attachments: composerOptions.attachments.map((file) => file.id),
+        };
+        const fingerprint = JSON.stringify(action);
+        if (sendReceipt.current.fingerprint !== fingerprint)
+          sendReceipt.current = { fingerprint, key: createUuid() };
+        // Hydrate the Desktop owner before sending. Retrying keeps both the
+        // created thread and the send receipt, including an ambiguous timeout.
+        await readRemoteThread(result.threadId);
+        await remoteAction(result.threadId, action, csrf, sendReceipt.current.key);
+      }
+      return result;
+    },
     retry: false,
     onSuccess: (result) => {
-      writeRemoteComposerValue(`remote-draft:${result.threadId}`, draft);
+      writeRemoteComposerValue(`remote-draft:${result.threadId}`, "");
       setDraft("");
       writeRemoteComposerValue(
         `remote-options:${result.threadId}`,
-        JSON.stringify(composerOptions),
+        JSON.stringify({ ...composerOptions, attachments: [] }),
       );
       setComposerOptions({ ...composerOptions, attachments: [] });
       onCreated(result.threadId);
@@ -674,7 +702,7 @@ function NewRemoteTask({
               <select
                 aria-label="工作位置"
                 value={project}
-                disabled={create.isPending || projects.isPending}
+                disabled={create.isPending || projects.isPending || !!createdThread}
                 onChange={(e) => {
                   setProject(e.target.value);
                   key.current = createUuid();
@@ -730,8 +758,8 @@ function RemoteConversation({
   const [composerOptions, setComposerOptions] = useRemoteComposerOptions(id);
   const conversation = useQuery({
     queryKey: ["remote-thread", id],
-    queryFn: () => readRemoteThread(id),
-    refetchInterval: 2_000,
+    queryFn: ({ signal }) => readRemoteThread(id, signal),
+    refetchInterval: (query) => (query.state.error ? false : 2_000),
     retry: false,
     staleTime: 0,
   });

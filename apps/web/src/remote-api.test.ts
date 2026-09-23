@@ -1,10 +1,32 @@
 import { NativeMediaError } from "./feishu-images";
 import { afterEach, expect, it, vi } from "vitest";
-import { uploadRemoteFile, remoteErrorMessage, remoteUploadErrorMessage } from "./remote-api";
+import {
+  uploadRemoteFile,
+  remoteErrorMessage,
+  remoteUploadErrorMessage,
+  readRemoteThread,
+} from "./remote-api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+it("cancels an abandoned conversation read without leaving its request pending", async () => {
+  const controller = new AbortController();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        }),
+    ),
+  );
+  const reading = readRemoteThread("old", controller.signal);
+  const rejected = expect(reading).rejects.toMatchObject({ name: "AbortError" });
+  controller.abort();
+  await rejected;
 });
 
 it("overlaps four upload segments and retries a dropped segment without losing the file", async () => {

@@ -1,12 +1,12 @@
 import { useRef, useState, type SetStateAction } from "react";
 import { z } from "zod";
+import { useQuery } from "@tanstack/react-query";
+import { listRemoteModels } from "./remote-api";
 import { RemoteAttachmentSchema, type RemoteModel } from "@codexboard/contracts";
-export const DEFAULT_REMOTE_MODEL = "gpt-6-astra";
-export const DEFAULT_REMOTE_EFFORT = "medium";
 const OptionsSchema = z.object({
   approvalMode: z.enum(["ask", "auto", "full"]).default("auto"),
-  model: z.string().default(DEFAULT_REMOTE_MODEL),
-  effort: z.string().default(DEFAULT_REMOTE_EFFORT),
+  model: z.string().optional(),
+  effort: z.string().optional(),
   selectionMode: z.enum(["default", "model"]).default("default"),
   serviceTier: z.string().nullable().default(null),
   attachments: z.array(RemoteAttachmentSchema).max(8).default([]),
@@ -18,7 +18,7 @@ export function readComposerOptions(saved: string | null): ComposerOptions {
     const parsed = OptionsSchema.parse(raw);
     if (
       raw.selectionMode === undefined &&
-      (parsed.model !== DEFAULT_REMOTE_MODEL || parsed.effort !== DEFAULT_REMOTE_EFFORT)
+      (parsed.model !== undefined || parsed.effort !== undefined)
     )
       parsed.selectionMode = "model";
     return parsed;
@@ -83,25 +83,36 @@ export function useRemoteComposerOptions(key: string) {
     writeRemoteComposerValue(`remote-options:${key}`, JSON.stringify(next));
     update(next);
   };
-  return [options, setOptions] as const;
+  const catalog = useQuery({
+    queryKey: ["remote-models"],
+    queryFn: listRemoteModels,
+    enabled: options.selectionMode === "default" && options.model !== undefined,
+    staleTime: 0,
+    retry: false,
+  });
+  // A saved Default selection must still be in Desktop's current curated set.
+  // While it cannot be confirmed, omit overrides and let Desktop choose.
+  const resolved =
+    options.selectionMode === "default" &&
+    options.model &&
+    !defaultRemotePresets(catalog.data ?? []).some(
+      (p) => p.model === options.model && p.effort === options.effort,
+    )
+      ? { ...options, model: undefined, effort: undefined, serviceTier: null }
+      : options;
+  return [resolved, setOptions] as const;
 }
 
-// Desktop recommendation config 423260384, checked 2026-09-10.
-// Preserve its order and omit combinations unavailable on the connected host.
+// Desktop publishes a curated slider, independent of the full model catalog.
 export function defaultRemotePresets(models: RemoteModel[]) {
-  const pairs = [
-    ["gpt-5.6-terra", "low"],
-    ["gpt-5.6-sol", "low"],
-    ["gpt-5.6-sol", "medium"],
-    ["gpt-6-astra", "low"],
-    ["gpt-6-astra", "medium"],
-    ["gpt-6-astra", "xhigh"],
-  ] as const;
-  return pairs.flatMap(([model, effort]) =>
-    models.some((item) => item.id === model && item.efforts.includes(effort))
-      ? [{ model, effort }]
-      : [],
-  );
+  return models
+    .flatMap((model) =>
+      (model.defaultPresets ?? [])
+        .filter((p) => model.efforts.includes(p.effort))
+        .map((p) => ({ model: model.id, ...p })),
+    )
+    .sort((a, b) => a.order - b.order)
+    .map(({ model, effort }) => ({ model, effort }));
 }
 
 export const effortLabels: Record<string, string> = {

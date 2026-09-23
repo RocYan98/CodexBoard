@@ -1,8 +1,7 @@
-// Vector knot from the embedded OpenAI vector in the approved source PNG.
-CGPathMoveToPoint(path, NULL, 508.749, 317.399);
-CGPathAddCurveToPoint(path, NULL, 516.777, 287.314, 508.991, 253.884, 485.389, 230.282);
-CGPathAddCurveToPoint(path, NULL, 461.788, 206.681, 428.36, 198.895, 398.273, 206.923);
-CGPathAddCurveToPoint(path, NULL, 376.231, 184.928, 343.39, 174.956, 311.148, 183.596);
+// Vector knot from the embedded OpenAI vector in the approved source PNG. CGPathMoveToPoint(path,
+NULL, 508.749, 317.399); CGPathAddCurveToPoint(path, NULL, 516.777, 287.314, 508.991, 253.884,
+485.389, 230.282); CGPathAddCurveToPoint(path, NULL, 461.788, 206.681, 428.36, 198.895, 398.273,
+206.923); CGPathAddCurveToPoint(path, NULL, 376.231, 184.928, 343.39, 174.956, 311.148, 183.596);
 CGPathAddCurveToPoint(path, NULL, 278.906, 192.234, 255.45, 217.292, 247.36, 247.361);
 CGPathAddCurveToPoint(path, NULL, 217.291, 255.451, 192.233, 278.91, 183.595, 311.149);
 CGPathAddCurveToPoint(path, NULL, 174.957, 343.391, 184.927, 376.232, 206.924, 398.274);
@@ -12,77 +11,52 @@ CGPathAddCurveToPoint(path, NULL, 339.442, 530.745, 372.286, 540.717, 404.525, 5
 CGPathAddCurveToPoint(path, NULL, 436.767, 523.441, 460.223, 498.384, 468.313, 468.315);
 CGPathAddCurveToPoint(path, NULL, 498.383, 460.224, 523.44, 436.766, 532.078, 404.526);
 CGPathAddCurveToPoint(path, NULL, 540.716, 372.285, 530.747, 339.443, 508.749, 317.402);
-CGPathAddLineToPoint(path, NULL, 508.749, 317.399);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 470.899, 244.776);
-CGPathAddCurveToPoint(path, NULL, 486.892, 260.77, 493.488, 282.601, 490.687, 303.412);
-CGPathAddLineToPoint(path, NULL, 415.577, 260.046);
+CGPathAddLineToPoint(path, NULL, 508.749, 317.399); CGPathCloseSubpath(path);
+CGPathMoveToPoint(path, NULL, 470.899, 244.776); CGPathAddCurveToPoint(path, NULL, 486.892, 260.77,
+493.488, 282.601, 490.687, 303.412); CGPathAddLineToPoint(path, NULL, 415.577, 260.046);
 CGPathAddCurveToPoint(path, NULL, 412.411, 258.218, 408.509, 258.218, 405.345, 260.046);
-CGPathAddLineToPoint(path, NULL, 317.401, 310.82);
-CGPathAddLineToPoint(path, NULL, 317.401, 277.526);
-CGPathAddCurveToPoint(path, NULL, 317.401, 275.191, 318.652, 273.005, 320.676, 271.837);
-CGPathAddLineToPoint(path, NULL, 387.644, 233.174);
-CGPathAddCurveToPoint(path, NULL, 414.178, 218.353, 448.346, 222.223, 470.901, 244.776);
-CGPathAddLineToPoint(path, NULL, 470.899, 244.776);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 357.837, 311.144);
-CGPathAddLineToPoint(path, NULL, 398.275, 334.491);
-CGPathAddLineToPoint(path, NULL, 398.275, 381.185);
-CGPathAddLineToPoint(path, NULL, 357.837, 404.532);
-CGPathAddLineToPoint(path, NULL, 317.398, 381.185);
-CGPathAddLineToPoint(path, NULL, 317.398, 334.491);
-CGPathAddLineToPoint(path, NULL, 357.837, 311.144);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 264.776, 269.693);
+CGPathAddLineToPoint(path, NULL, 317.401, 310.82); CGPathAddLineToPoint(path, NULL, 317.401,
+277.526); CGPathAddCurveToPoint(path, NULL, 317.401, 275.191, 318.652, 273.005, 320.676, 271.837);
+CGPathAddLineToPoint(path, NULL, 387.644, 233.174); CGPathAddCurveToPoint(path, NULL, 414.178,
+218.353, 448.346, 222.223, 470.901, 244.776); CGPathAddLineToPoint(path, NULL, 470.899, 244.776);
+CGPathCloseSubpath(path); CGPathMoveToPoint(path, NULL, 357.837, 311.144);
+CGPathAddLineToPoint(path, NULL, 398.275, 334.491); CGPathAddLineToPoint(path, NULL, 398.275,
+381.185); CGPathAddLineToPoint(path, NULL, 357.837, 404.532); CGPathAddLineToPoint(path, NULL,
+317.398, 381.185); CGPathAddLineToPoint(path, NULL, 317.398, 334.491); CGPathAddLineToPoint(path,
+NULL, 357.837, 311.144); CGPathCloseSubpath(path); CGPathMoveToPoint(path, NULL, 264.776, 269.693);
 CGPathAddCurveToPoint(path, NULL, 265.207, 239.305, 285.644, 211.649, 316.453, 203.393);
 CGPathAddCurveToPoint(path, NULL, 338.3, 197.54, 360.505, 202.744, 377.127, 215.573);
-CGPathAddLineToPoint(path, NULL, 302.014, 258.937);
-CGPathAddCurveToPoint(path, NULL, 298.848, 260.764, 296.898, 264.144, 296.898, 267.798);
-CGPathAddLineToPoint(path, NULL, 296.898, 369.346);
-CGPathAddLineToPoint(path, NULL, 268.065, 352.699);
-CGPathAddCurveToPoint(path, NULL, 266.043, 351.531, 264.776, 349.353, 264.776, 347.017);
-CGPathAddLineToPoint(path, NULL, 264.776, 269.691);
-CGPathAddLineToPoint(path, NULL, 264.776, 269.693);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 203.391, 316.454);
-CGPathAddCurveToPoint(path, NULL, 209.244, 294.608, 224.854, 277.978, 244.276, 269.999);
-CGPathAddLineToPoint(path, NULL, 244.276, 356.73);
+CGPathAddLineToPoint(path, NULL, 302.014, 258.937); CGPathAddCurveToPoint(path, NULL, 298.848,
+260.764, 296.898, 264.144, 296.898, 267.798); CGPathAddLineToPoint(path, NULL, 296.898, 369.346);
+CGPathAddLineToPoint(path, NULL, 268.065, 352.699); CGPathAddCurveToPoint(path, NULL, 266.043,
+351.531, 264.776, 349.353, 264.776, 347.017); CGPathAddLineToPoint(path, NULL, 264.776, 269.691);
+CGPathAddLineToPoint(path, NULL, 264.776, 269.693); CGPathCloseSubpath(path);
+CGPathMoveToPoint(path, NULL, 203.391, 316.454); CGPathAddCurveToPoint(path, NULL, 209.244, 294.608,
+224.854, 277.978, 244.276, 269.999); CGPathAddLineToPoint(path, NULL, 244.276, 356.73);
 CGPathAddCurveToPoint(path, NULL, 244.276, 360.384, 246.226, 363.763, 249.392, 365.591);
-CGPathAddLineToPoint(path, NULL, 337.337, 416.365);
-CGPathAddLineToPoint(path, NULL, 308.503, 433.013);
-CGPathAddCurveToPoint(path, NULL, 306.481, 434.181, 303.961, 434.188, 301.939, 433.02);
-CGPathAddLineToPoint(path, NULL, 234.971, 394.357);
-CGPathAddCurveToPoint(path, NULL, 208.868, 378.789, 195.138, 347.261, 203.391, 316.454);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 244.775, 470.9);
-CGPathAddCurveToPoint(path, NULL, 228.781, 454.906, 222.186, 433.075, 224.986, 412.264);
-CGPathAddLineToPoint(path, NULL, 300.096, 455.63);
-CGPathAddCurveToPoint(path, NULL, 303.263, 457.457, 307.164, 457.457, 310.328, 455.63);
-CGPathAddLineToPoint(path, NULL, 398.273, 404.856);
-CGPathAddLineToPoint(path, NULL, 398.273, 438.149);
-CGPathAddCurveToPoint(path, NULL, 398.273, 440.485, 397.022, 442.671, 394.997, 443.839);
-CGPathAddLineToPoint(path, NULL, 328.029, 482.502);
-CGPathAddCurveToPoint(path, NULL, 301.495, 497.322, 267.327, 493.452, 244.772, 470.9);
-CGPathAddLineToPoint(path, NULL, 244.775, 470.9);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 450.897, 445.982);
-CGPathAddCurveToPoint(path, NULL, 450.466, 476.371, 430.029, 504.027, 399.22, 512.283);
-CGPathAddCurveToPoint(path, NULL, 377.373, 518.136, 355.168, 512.932, 338.547, 500.102);
-CGPathAddLineToPoint(path, NULL, 413.659, 456.738);
+CGPathAddLineToPoint(path, NULL, 337.337, 416.365); CGPathAddLineToPoint(path, NULL, 308.503,
+433.013); CGPathAddCurveToPoint(path, NULL, 306.481, 434.181, 303.961, 434.188, 301.939, 433.02);
+CGPathAddLineToPoint(path, NULL, 234.971, 394.357); CGPathAddCurveToPoint(path, NULL, 208.868,
+378.789, 195.138, 347.261, 203.391, 316.454); CGPathCloseSubpath(path); CGPathMoveToPoint(path,
+NULL, 244.775, 470.9); CGPathAddCurveToPoint(path, NULL, 228.781, 454.906, 222.186, 433.075,
+224.986, 412.264); CGPathAddLineToPoint(path, NULL, 300.096, 455.63); CGPathAddCurveToPoint(path,
+NULL, 303.263, 457.457, 307.164, 457.457, 310.328, 455.63); CGPathAddLineToPoint(path, NULL,
+398.273, 404.856); CGPathAddLineToPoint(path, NULL, 398.273, 438.149); CGPathAddCurveToPoint(path,
+NULL, 398.273, 440.485, 397.022, 442.671, 394.997, 443.839); CGPathAddLineToPoint(path, NULL,
+328.029, 482.502); CGPathAddCurveToPoint(path, NULL, 301.495, 497.322, 267.327, 493.452, 244.772,
+470.9); CGPathAddLineToPoint(path, NULL, 244.775, 470.9); CGPathCloseSubpath(path);
+CGPathMoveToPoint(path, NULL, 450.897, 445.982); CGPathAddCurveToPoint(path, NULL, 450.466, 476.371,
+430.029, 504.027, 399.22, 512.283); CGPathAddCurveToPoint(path, NULL, 377.373, 518.136, 355.168,
+512.932, 338.547, 500.102); CGPathAddLineToPoint(path, NULL, 413.659, 456.738);
 CGPathAddCurveToPoint(path, NULL, 416.826, 454.911, 418.775, 451.532, 418.775, 447.877);
-CGPathAddLineToPoint(path, NULL, 418.775, 346.329);
-CGPathAddLineToPoint(path, NULL, 447.609, 362.977);
-CGPathAddCurveToPoint(path, NULL, 449.631, 364.145, 450.897, 366.323, 450.897, 368.659);
-CGPathAddLineToPoint(path, NULL, 450.897, 445.985);
-CGPathAddLineToPoint(path, NULL, 450.897, 445.982);
-CGPathCloseSubpath(path);
-CGPathMoveToPoint(path, NULL, 512.282, 399.221);
+CGPathAddLineToPoint(path, NULL, 418.775, 346.329); CGPathAddLineToPoint(path, NULL, 447.609,
+362.977); CGPathAddCurveToPoint(path, NULL, 449.631, 364.145, 450.897, 366.323, 450.897, 368.659);
+CGPathAddLineToPoint(path, NULL, 450.897, 445.985); CGPathAddLineToPoint(path, NULL, 450.897,
+445.982); CGPathCloseSubpath(path); CGPathMoveToPoint(path, NULL, 512.282, 399.221);
 CGPathAddCurveToPoint(path, NULL, 506.429, 421.068, 490.819, 437.697, 471.397, 445.676);
-CGPathAddLineToPoint(path, NULL, 471.397, 358.946);
-CGPathAddCurveToPoint(path, NULL, 471.397, 355.292, 469.448, 351.912, 466.281, 350.085);
-CGPathAddLineToPoint(path, NULL, 378.336, 299.311);
-CGPathAddLineToPoint(path, NULL, 407.17, 282.663);
-CGPathAddCurveToPoint(path, NULL, 409.192, 281.495, 411.712, 281.487, 413.734, 282.655);
-CGPathAddLineToPoint(path, NULL, 480.702, 321.318);
+CGPathAddLineToPoint(path, NULL, 471.397, 358.946); CGPathAddCurveToPoint(path, NULL, 471.397,
+355.292, 469.448, 351.912, 466.281, 350.085); CGPathAddLineToPoint(path, NULL, 378.336, 299.311);
+CGPathAddLineToPoint(path, NULL, 407.17, 282.663); CGPathAddCurveToPoint(path, NULL, 409.192,
+281.495, 411.712, 281.487, 413.734, 282.655); CGPathAddLineToPoint(path, NULL, 480.702, 321.318);
 CGPathAddCurveToPoint(path, NULL, 506.805, 336.887, 520.536, 368.415, 512.282, 399.221);
 CGPathCloseSubpath(path);

@@ -1,3 +1,5 @@
+import { desktopThreadPlacement } from "./codex-desktop-sidebar.mjs";
+import { readDesktopPresets } from "./codex-desktop-models.mjs";
 import { REMOTE_UPLOAD_MAX_BASE64_LENGTH, remoteTurnItems } from "@codexboard/contracts";
 import { readTaskProgress } from "./codex-task-progress.mjs";
 import { readRemoteImage } from "./codex-remote-image.mjs";
@@ -341,6 +343,8 @@ export async function createCodexSessionBridge({
         if (message.method === "initialized") control.write(message);
         return;
       }
+      if (message.method === "taskboard/remote/model-presets")
+        return { presets: await readDesktopPresets(message.params?.models ?? []) };
       if (message.method === "taskboard/taskProgress")
         return await readTaskProgress(codexHome, message.params);
       if (message.method === "taskboard/gitOrigins")
@@ -552,19 +556,25 @@ export async function createCodexSessionBridge({
         );
         return {
           ...result,
-          data: result.data.map((thread) => ({
-            ...thread,
-            name: titles.get(thread.id) ?? thread.name,
-          })),
+          data: await desktopThreadPlacement(
+            codexHome,
+            result.data.map((thread) => ({
+              ...thread,
+              name: titles.get(thread.id) ?? thread.name,
+            })),
+          ),
         };
       }
       if (message.method === "thread/name/set") {
         return await withHelper((worker) => worker.request(message.method, message.params));
       }
+      if (message.method === "model/list") {
+        // A long-lived helper retains its startup catalog. A fresh read-only
+        // helper loads the current host/account catalog without owning a thread.
+        return await withHelper((worker) => worker.request(message.method, message.params));
+      }
       if (
-        ["fs/createDirectory", "model/list", "account/rateLimits/read", "command/exec"].includes(
-          message.method,
-        )
+        ["fs/createDirectory", "account/rateLimits/read", "command/exec"].includes(message.method)
       ) {
         return await control.request(message.method, message.params);
       }

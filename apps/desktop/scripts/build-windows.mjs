@@ -53,7 +53,7 @@ export function verifyRuntimeArchive(bytes, expected) {
 }
 export async function buildWindows() {
   if (process.platform !== "win32" || process.arch !== "x64")
-    throw new Error("Windows 测试安装包必须在 Windows x64 构建");
+    throw new Error("Windows 安装包必须在 Windows x64 构建");
   const project = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const desktop = join(project, "apps/desktop");
   const version = JSON.parse(readFileSync(join(project, "package.json"), "utf8")).version;
@@ -197,10 +197,11 @@ export async function buildWindows() {
   const bundle = join(desktop, "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis");
   for (const name of readdirSync(bundle).filter((name) => name.endsWith(".exe"))) {
     const source = join(bundle, name);
-    cpSync(source, join(artifacts, name));
+    const artifactName = `CodexBoard-${version}-windows-x64-setup.exe`;
+    cpSync(source, join(artifacts, artifactName));
     writeFileSync(
-      join(artifacts, `${name}.sha256`),
-      `${createHash("sha256").update(readFileSync(source)).digest("hex")}  ${name}\n`,
+      join(artifacts, `${artifactName}.sha256`),
+      `${createHash("sha256").update(readFileSync(source)).digest("hex")}  ${artifactName}\n`,
     );
   }
   writeFileSync(
@@ -212,13 +213,13 @@ export async function buildWindows() {
         architecture: process.arch,
         runtimeAssets: WINDOWS_RUNTIME_ASSETS,
         signed: false,
-        release: false,
+        release: true,
       },
       null,
       2,
     ),
   );
-  console.log(`Windows 测试安装包：${artifacts}`);
+  console.log(`Windows 安装包：${artifacts}`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
   await buildWindows();

@@ -18,6 +18,8 @@ import {
 } from "@codexboard/contracts";
 import { createConnection } from "node:net";
 import { resolveRemoteUploads } from "./codex-remote-upload.mjs";
+import { createDesktopFrameReader } from "./codex-ipc-frames.mjs";
+import { remoteSnapshot } from "./codex-remote-snapshot.mjs";
 import { desktopIpcPath } from "./codex-local-endpoint.mjs";
 
 const versions = {
@@ -60,6 +62,8 @@ export async function connectDesktopSession({
   onDisconnect,
   timeoutMs = 5000,
   connectTimeoutMs = timeoutMs,
+  discoveryTimeoutMs = connectTimeoutMs,
+  snapshotTimeoutMs = 30_000,
   historyTimeoutMs = 30_000,
   signal,
 }) {
@@ -71,8 +75,7 @@ export async function connectDesktopSession({
   const approvals = new Map();
   const respondedRequests = new Set();
   const emitted = new Set();
-  let buffer = Buffer.alloc(0),
-    clientId = "initializing-client",
+  let clientId = "initializing-client",
     owner,
     state,
     revision;
@@ -96,14 +99,23 @@ export async function connectDesktopSession({
     new Promise((resolve, reject) => {
       const requestId = randomUUID();
       const requestTimeout =
-        method === "thread-follower-load-complete-history"
-          ? historyTimeoutMs
-          : ready
-            ? timeoutMs
-            : connectTimeoutMs;
+        method === "thread-owner-discovery"
+          ? discoveryTimeoutMs
+          : method === "thread-follower-load-complete-history"
+            ? historyTimeoutMs
+            : ready
+              ? timeoutMs
+              : connectTimeoutMs;
       const timer = setTimeout(() => {
         pending.delete(requestId);
-        reject(rpcError("Codex 桌面请求超时，执行结果尚未确认", -32003));
+        reject(
+          rpcError(
+            method === "thread-owner-discovery"
+              ? "Codex 桌面对话尚未加载"
+              : "Codex 桌面请求超时，执行结果尚未确认",
+            method === "thread-owner-discovery" ? -32001 : -32003,
+          ),
+        );
       }, requestTimeout);
       pending.set(requestId, { resolve, reject, timer, method });
       try {
@@ -170,6 +182,7 @@ export async function connectDesktopSession({
   const fail = () => {
     if (closed) return;
     closed = true;
+    snapshotReady();
     for (const waiter of pending.values()) {
       clearTimeout(waiter.timer);
       waiter.reject(rpcError("Codex 桌面连接已中断", ready ? -32003 : -32001));
@@ -317,17 +330,10 @@ export async function connectDesktopSession({
     snapshotReady();
     flush();
   }
+  const readFrame = createDesktopFrameReader(receive);
   socket.on("data", (chunk) => {
     try {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 4) {
-        const size = buffer.readUInt32LE();
-        if (size > 32 * 1024 * 1024) throw new Error("oversize IPC frame");
-        if (buffer.length < size + 4) break;
-        const message = JSON.parse(buffer.subarray(4, 4 + size).toString());
-        buffer = buffer.subarray(4 + size);
-        receive(message);
-      }
+      readFrame(chunk);
     } catch {
       fail();
     }
@@ -350,7 +356,7 @@ export async function connectDesktopSession({
     }
     pending.clear();
     rejectRevisionWaiters();
-    socket.end();
+    socket.destroy();
   }
   try {
     const initialized = await request("initialize", { clientType: "cli" }, undefined);
@@ -368,7 +374,10 @@ export async function connectDesktopSession({
       await Promise.race([
         firstSnapshot,
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(rpcError("Codex 桌面会话状态超时")), connectTimeoutMs);
+          timer = setTimeout(
+            () => reject(rpcError("Codex 桌面对话历史同步超时，请重试", -32003)),
+            snapshotTimeoutMs,
+          );
         }),
       ]);
     } finally {
@@ -399,7 +408,7 @@ export async function connectDesktopSession({
           const busy = active || state.threadRuntimeStatus?.type === "active";
           if (method === "taskboard/remote/read")
             return {
-              ...structuredClone(state),
+              ...remoteSnapshot(state),
               remoteQueue: queueView(readDesktopQueue(codexHome, threadId), codexHome),
             };
           if (method === "taskboard/remote/answer") {
@@ -964,7 +973,9 @@ export async function connectDesktopSession({
 // Desktop uses Immer patches. Reject invalid paths instead of silently losing
 // a completion or applying prototype properties from a corrupted frame.
 export function applyDesktopPatches(state, patches) {
-  const result = structuredClone(state);
+  // Copy only paths touched by patches. Cloning all historical tool media for
+  // every streamed token makes an otherwise idle old conversation very costly.
+  const result = { ...state };
   for (const { op, path, value } of patches) {
     if (
       !["add", "replace", "remove"].includes(op) ||
@@ -976,7 +987,9 @@ export function applyDesktopPatches(state, patches) {
     let target = result;
     for (const part of path.slice(0, -1)) {
       if (!Object.hasOwn(target, part)) throw new Error("Missing Desktop patch path");
-      target = target[part];
+      const next = target[part];
+      if (!next || typeof next !== "object") throw new Error("Invalid Desktop patch path");
+      target = target[part] = Array.isArray(next) ? [...next] : { ...next };
     }
     const key = path.at(-1);
     if (Array.isArray(target)) {

@@ -249,21 +249,32 @@ test("Astra medium default, reset and speed preserve focus and reach the send re
             name: "GPT-6 Astra",
             efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
             defaultEffort: "high",
-            serviceTiers: [{ id: "priority", name: "Fast" }],
+            isDefault: true,
+            defaultPresets: [
+              { effort: "low", order: 3 },
+              { effort: "medium", order: 4 },
+              { effort: "xhigh", order: 5 },
+            ],
+            serviceTiers: [{ id: "priority", name: "Fast", description: "2x speed" }],
           },
           {
             id: "gpt-5.6-terra",
             name: "GPT-5.6 Terra",
             efforts: ["low", "medium", "high", "xhigh"],
             defaultEffort: "medium",
-            serviceTiers: [{ id: "priority", name: "Fast" }],
+            defaultPresets: [{ effort: "low", order: 0 }],
+            serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed" }],
           },
           {
             id: "gpt-5.6-sol",
             name: "GPT-5.6 Sol",
             efforts: ["low", "medium", "high", "xhigh"],
             defaultEffort: "medium",
-            serviceTiers: [{ id: "priority", name: "Fast" }],
+            defaultPresets: [
+              { effort: "low", order: 1 },
+              { effort: "medium", order: 2 },
+            ],
+            serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed" }],
           },
           { id: "other", name: "Other model", efforts: ["low", "high"], defaultEffort: "low" },
         ],
@@ -318,13 +329,13 @@ test("Astra medium default, reset and speed preserve focus and reach the send re
     });
   };
   for (const [index, label] of [
-    "GPT-5.6 Terra · 轻度",
-    "GPT-5.6 Sol · 轻度",
-    "GPT-5.6 Sol · 中",
-    "GPT-6 Astra · 轻度",
-    "GPT-6 Astra · 中",
-    "GPT-6 Astra · 极高",
-  ].entries()) {
+    [0, "GPT-5.6 Terra · 轻度"],
+    [1, "GPT-5.6 Sol · 轻度"],
+    [2, "GPT-5.6 Sol · 中"],
+    [3, "GPT-6 Astra · 轻度"],
+    [4, "GPT-6 Astra · 中"],
+    [5, "GPT-6 Astra · 极高"],
+  ] as const) {
     await tapPreset(index);
     await expect(page.getByRole("slider")).toHaveAttribute("aria-valuetext", label);
     const options = await page.evaluate(() =>
@@ -907,6 +918,26 @@ for (const richContent of [
 }
 
 test("unchanged polling leaves native bottom scrolling alone", async ({ page }) => {
+  // Keep the fixture independent of uncommitted changes in the test checkout:
+  // a late review shortcut legitimately resizes the message area by 42px.
+  await page.route("**/api/v1/remote/threads/*/review?*", (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          repository: false,
+          branch: null,
+          baseRef: null,
+          scope: "branch",
+          changedCount: 0,
+          added: 0,
+          removed: 0,
+          countsComplete: true,
+          files: [],
+          message: "",
+        },
+      },
+    }),
+  );
   const id = "11111111-1111-4111-8111-111111111122";
   let polls = 0;
   let text = "历史消息\n\n".repeat(60) + "最后一条消息";

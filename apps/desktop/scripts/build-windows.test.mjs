@@ -29,7 +29,7 @@ test("Windows test installer has a valid icon and an install directory separate 
   );
   assert.deepEqual(config.bundle.targets, ["nsis"]);
   assert.equal(config.bundle.windows.nsis.installMode, "currentUser");
-  assert.equal(config.productName, "CodexBoard Windows Test");
+  assert.equal(config.productName, "CodexBoard Desktop");
   assert.equal(config.bundle.resources, undefined);
   assert.equal(WINDOWS_BUNDLE_CONFIG.bundle.resources["../dist/windows-runtime/"], "runtime/");
   const icon = readFileSync(new URL("../src-tauri/icons/icon.ico", import.meta.url));

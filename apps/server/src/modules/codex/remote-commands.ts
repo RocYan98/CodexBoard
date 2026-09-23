@@ -1,3 +1,4 @@
+import { ErrorCodeSchema } from "@codexboard/contracts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { AppError } from "../../app-error.js";
@@ -7,7 +8,7 @@ const Row = z.object({ requestHash: z.string(), responseJson: z.string() });
 const Receipt = z.discriminatedUnion("state", [
   z.object({ state: z.literal("pending") }),
   z.object({ state: z.literal("done"), result: z.unknown() }),
-  z.object({ state: z.literal("failed"), message: z.string() }),
+  z.object({ state: z.literal("failed"), message: z.string(), code: ErrorCodeSchema.optional() }),
 ]);
 
 // Persist BEFORE the side effect. An interrupted process leaves a pending
@@ -39,7 +40,9 @@ export class RemoteCommands {
       const running = this.#running.get(runningKey);
       if (running) return running;
       throw new AppError(
-        "DUPLICATE_REQUEST",
+        receipt.state === "failed"
+          ? (receipt.code ?? "REMOTE_RESULT_UNKNOWN")
+          : "REMOTE_RESULT_UNKNOWN",
         409,
         receipt.state === "failed"
           ? receipt.message
@@ -69,8 +72,12 @@ export class RemoteCommands {
             error instanceof AppError && error.statusCode < 500
               ? error.message
               : "操作结果尚未确认，请刷新对话核实；不会自动重试";
-          save({ state: "failed", message });
-          throw new AppError("INVALID_REQUEST", 409, message);
+          const code =
+            error instanceof AppError && error.statusCode < 500
+              ? error.code
+              : "REMOTE_RESULT_UNKNOWN";
+          save({ state: "failed", message, code });
+          throw new AppError(code, 409, message);
         },
       )
       .finally(() => this.#running.delete(runningKey));
