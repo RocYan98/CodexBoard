@@ -1,0 +1,60 @@
+name: Publish verified Windows artifact
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Windows build run ID
+        required: true
+        type: string
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate build, tag and draft
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          test "$(jq -r .conclusion run.json)" = success
+          test "$(jq -r .path run.json)" = .github/workflows/windows-ci.yml
+          BUILD_SHA=$(jq -r .head_sha run.json)
+          TAG_SHA=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)
+          test "$BUILD_SHA" = "$TAG_SHA"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          echo "BUILD_SHA=$BUILD_SHA" >> "$GITHUB_ENV"
+      - name: Download exact installer artifact
+        run: gh run download "$BUILD_RUN" --name "windows-x64-installer-$BUILD_SHA" --dir artifact
+      - name: Verify version, architecture and SHA-256
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          version=os.environ['RELEASE_TAG'][1:]
+          root=pathlib.Path('artifact')
+          name=f'CodexBoard-{version}-windows-x64-setup.exe'
+          info=json.loads((root/'build-info.json').read_text(encoding='utf-8-sig'))
+          assert info['version']==version and info['platform']=='win32' and info['architecture']=='x64'
+          line=(root/(name+'.sha256')).read_text().strip()
+          assert re.fullmatch(r'[a-f0-9]{64}  '+re.escape(name),line)
+          assert hashlib.sha256((root/name).read_bytes()).hexdigest()==line.split()[0]
+          print(name, 'SHA-256 verified')
+          PY
+      - name: Upload Windows files to the draft
+        run: |
+          NAME="CodexBoard-${RELEASE_TAG#v}-windows-x64-setup.exe"
+          gh release upload "$RELEASE_TAG" "artifact/$NAME" "artifact/$NAME.sha256" --clobber
