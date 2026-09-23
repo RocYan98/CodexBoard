@@ -169,6 +169,12 @@ export async function runSetupChecks(input, options = {}) {
     Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
       ? Math.min(options.timeoutMs, 5000)
       : 3500;
+  // Public health includes Internet routing, the tunnel and TLS establishment.
+  // Keep its deadline separate from local commands and individual DNS queries.
+  const publicTimeoutMs =
+    Number.isFinite(options.publicTimeoutMs) && options.publicTimeoutMs > 0
+      ? Math.min(options.publicTimeoutMs, 10_000)
+      : 10_000;
   const selected =
     input.section === "all" || !input.section
       ? SETUP_SECTIONS.filter((section) =>
@@ -191,8 +197,11 @@ export async function runSetupChecks(input, options = {}) {
       results.push(result);
       options.onResult?.(result);
     }
-    const network = (url, request = {}) =>
-      limited((signal) => deps.requestJson(url, { ...request, signal, timeoutMs }), timeoutMs);
+    const network = (url, request = {}, limitMs = timeoutMs) =>
+      limited(
+        (signal) => deps.requestJson(url, { ...request, signal, timeoutMs: limitMs }),
+        limitMs,
+      );
     const command = (file, args) =>
       limited(
         (signal) =>
@@ -493,7 +502,7 @@ export async function runSetupChecks(input, options = {}) {
       }
       const protocolName = url.protocol === "http:" ? "HTTP" : "HTTPS";
       try {
-        const response = await network(new URL("/api/health", origin).href);
+        const response = await network(new URL("/api/health", origin).href, {}, publicTimeoutMs);
         const parsed = HealthResponseSchema.safeParse(response.body);
         if (
           response.status !== 200 ||
