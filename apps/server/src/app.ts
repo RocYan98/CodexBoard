@@ -285,7 +285,11 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     database: options.database,
     taskboard,
     queue: executionQueue,
-    gitFinalizer: new TaskGitFinalizer(options.config.CODEXBOARD_WORKSPACE_ROOTS),
+    gitFinalizer: new TaskGitFinalizer(
+      options.config.CODEXBOARD_WORKSPACE_ROOTS,
+      undefined,
+      options.config.CODEXBOARD_TEMPORARY_PROJECT_ROOT,
+    ),
     scheduleExecution: schedule,
     onRevisionCommitted: (revision) => eventFeed.notifyCommitted(revision),
   });

@@ -1,5 +1,10 @@
 import { hasActiveDesktopTurn } from "./desktop-execution-state.js";
-import { identityKey, identityFromKey, IdentityKeySchema } from "@codexboard/contracts";
+import {
+  identityKey,
+  identityFromKey,
+  IdentityKeySchema,
+  TEMPORARY_PROJECT_ID,
+} from "@codexboard/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -228,6 +233,7 @@ export class TaskLifecycleService {
       // automatic commit/cleanup flow. Historical delivery refs are irrelevant.
       const directory = this.#taskDirectory(operation.taskId);
       if (directory) {
+        const allowTemporaryProjectRoot = task.projectId === TEMPORARY_PROJECT_ID;
         const project = this.#options.database
           .prepare("SELECT workspace_realpath AS cwd FROM projects WHERE id = ?")
           .get(task.projectId) as { cwd: string | null };
@@ -237,6 +243,7 @@ export class TaskLifecycleService {
           operation.id,
           project.cwd,
           this.#taskBranch(operation.taskId, directory, operation.snapshotJson),
+          allowTemporaryProjectRoot,
         );
         if (snapshot) {
           this.#lockResources(operation, snapshot);
@@ -244,6 +251,7 @@ export class TaskLifecycleService {
           snapshot = await this.#options.gitFinalizer.verify(
             snapshot,
             operation.targetStatus === "canceled" ? operation.taskId : undefined,
+            allowTemporaryProjectRoot,
           );
           this.#update(id, "running", "checking", snapshot);
         }

@@ -26,11 +26,16 @@ export interface TaskGitSnapshot {
 /** Task finalization only observes Git state. It never commits, removes files, or writes refs. */
 export class TaskGitFinalizer {
   readonly #allowedRoots: readonly string[];
+  readonly #temporaryProjectRoot: string | null;
   constructor(
     allowedRoots: readonly string[],
     private readonly runner?: WorkspaceCommandRunner,
+    temporaryProjectRoot?: string,
   ) {
     this.#allowedRoots = allowedRoots.map((root) => realpathSync.native(root));
+    this.#temporaryProjectRoot = temporaryProjectRoot
+      ? canonicalGitDirectory(temporaryProjectRoot)
+      : null;
   }
 
   async inspect(
@@ -39,22 +44,24 @@ export class TaskGitFinalizer {
     _operationId?: string,
     projectDirectory?: string | null,
     taskBranch?: string | null,
+    allowTemporaryProjectRoot = false,
   ): Promise<TaskGitSnapshot | null> {
-    const cwd = this.#allowed(directory);
+    const cwd = this.#allowed(directory, allowTemporaryProjectRoot);
     const present = existsSync(directory);
     if (!present && !projectDirectory)
       throw new AppError("INVALID_REQUEST", 409, "工作树已不存在，无法定位所属 Git 仓库");
-    let anchor = present ? cwd : this.#allowed(projectDirectory!);
+    let anchor = present ? cwd : this.#allowed(projectDirectory!, allowTemporaryProjectRoot);
     let existingWorktree = present;
     let root: string;
     try {
       root = (await this.#git(anchor, "rev-parse", "--show-toplevel")).trim();
     } catch (error) {
       if (!(error instanceof WorkspaceNotGitError) || !present) throw error;
-      if (!projectDirectory || this.#allowed(projectDirectory) === cwd) return null;
+      if (!projectDirectory || this.#allowed(projectDirectory, allowTemporaryProjectRoot) === cwd)
+        return null;
       // A removed worktree may leave an ordinary directory containing temporary files.
       // Inspect its owning repository so verification still rejects that residue.
-      anchor = this.#allowed(projectDirectory);
+      anchor = this.#allowed(projectDirectory, allowTemporaryProjectRoot);
       try {
         root = (await this.#git(anchor, "rev-parse", "--show-toplevel")).trim();
       } catch (projectError) {
@@ -68,7 +75,7 @@ export class TaskGitFinalizer {
     const fields = (await this.#git(anchor, "worktree", "list", "--porcelain", "-z")).split("\0");
     const mainPath = fields.find((field) => field.startsWith("worktree "))?.slice(9);
     if (!mainPath) throw new AppError("INVALID_REQUEST", 409, "无法确认主工作树");
-    const mainCwd = this.#allowed(mainPath);
+    const mainCwd = this.#allowed(mainPath, allowTemporaryProjectRoot);
     const commonDirectory = realpathSync.native(
       resolve(mainCwd, (await this.#git(mainCwd, "rev-parse", "--git-common-dir")).trim()),
     );
@@ -88,9 +95,16 @@ export class TaskGitFinalizer {
     };
   }
 
-  async verify(snapshot: TaskGitSnapshot, cancellationTaskId?: string): Promise<TaskGitSnapshot> {
+  async verify(
+    snapshot: TaskGitSnapshot,
+    cancellationTaskId?: string,
+    allowTemporaryProjectRoot = false,
+  ): Promise<TaskGitSnapshot> {
     const { cwd, mainCwd, branch, mainTask } = snapshot;
-    if (this.#allowed(mainCwd) !== mainCwd || this.#allowed(cwd) !== cwd)
+    if (
+      this.#allowed(mainCwd, allowTemporaryProjectRoot) !== mainCwd ||
+      this.#allowed(cwd, allowTemporaryProjectRoot) !== cwd
+    )
       throw new AppError("VERSION_CONFLICT", 409, "工作树路径已变化");
     const common = realpathSync.native(
       resolve(mainCwd, (await this.#git(mainCwd, "rev-parse", "--git-common-dir")).trim()),
@@ -141,14 +155,20 @@ export class TaskGitFinalizer {
     };
   }
 
-  #allowed(directory: string): string {
+  #allowed(directory: string, allowTemporaryProjectRoot = false): string {
     if (!isAbsolute(directory)) throw new AppError("FORBIDDEN", 403, "工作区必须使用绝对路径");
     const canonical = canonicalGitDirectory(directory);
+    const inside = (root: string) => {
+      const suffix = relative(root, canonical);
+      return suffix === "" || (!suffix.startsWith("..") && !isAbsolute(suffix));
+    };
     if (
-      !this.#allowedRoots.some((root) => {
-        const suffix = relative(root, canonical);
-        return suffix === "" || (!suffix.startsWith("..") && !isAbsolute(suffix));
-      })
+      !this.#allowedRoots.some(inside) &&
+      !(
+        allowTemporaryProjectRoot &&
+        this.#temporaryProjectRoot &&
+        inside(this.#temporaryProjectRoot)
+      )
     )
       throw new AppError("FORBIDDEN", 403, "完成检查目录超出允许的工作区");
     return canonical;
