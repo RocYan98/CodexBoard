@@ -31,12 +31,33 @@ export function findWindowsCodexPackage({ execute = execFileSync, exists = exist
       !/^OpenAI\.Codex_[a-z0-9]+$/.test(app.PackageFamilyName)
     )
       return undefined;
-    const cliPath = win32.join(app.InstallLocation, "app", "resources", "codex.exe");
+    const resources = win32.join(app.InstallLocation, "app", "resources");
+    const cliPath = [
+      win32.join(resources, "codex-cli", "bin", "codex.exe"),
+      win32.join(resources, "codex.exe"),
+    ].find(exists);
     const appPath = win32.join(app.InstallLocation, "app", "ChatGPT.exe");
-    if (!exists(cliPath) || !exists(appPath)) return undefined;
+    if (!cliPath || !exists(appPath)) return undefined;
     return { cliPath, appPath, appUserModelId: `${app.PackageFamilyName}!App` };
   } catch {
     return undefined;
+  }
+}
+
+export function canRunWindowsCodexCli(path, execute = execFileSync) {
+  try {
+    const output = execute(path, ["--version"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 3000,
+      maxBuffer: 8192,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return /^codex-cli\s+\S+/m.test(output.trim());
+  } catch {
+    // Registered MSIX files can exist but fail to execute (including UNKNOWN).
+    // Do not change ACLs or reveal raw diagnostics; retain standalone fallback.
+    return false;
   }
 }
 
@@ -45,7 +66,12 @@ export function findWindowsCodexCli({
   localAppData = Object.entries(env).find(([key]) => key.toLowerCase() === "localappdata")?.[1],
   exists = existsSync,
   findWindowsPackage = findWindowsCodexPackage,
+  canRun = canRunWindowsCodexCli,
 } = {}) {
+  // Match Desktop's catalog and capabilities when both installations exist.
+  // A separately installed CLI can have an older model catalog.
+  const desktop = findWindowsPackage({ exists });
+  if (desktop?.cliPath && canRun(desktop.cliPath)) return desktop.cliPath;
   if (typeof localAppData === "string") {
     const base = localAppData.replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "");
     if (
@@ -55,12 +81,12 @@ export function findWindowsCodexCli({
       !/(?:^|[\\/])\.{1,2}(?:[\\/]|$)/.test(base)
     ) {
       // The official standalone installer uses this one fixed per-user location.
-      // Keep Desktop package discovery independent; never run the CLI or scan PATH here.
+      // Use it only when Desktop is unavailable; never scan PATH here.
       const path = win32.join(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
       if (exists(path)) return path;
     }
   }
-  return findWindowsPackage({ exists })?.cliPath;
+  return undefined;
 }
 
 export function windowsOpenArguments(target) {

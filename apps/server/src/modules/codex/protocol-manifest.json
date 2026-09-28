@@ -1,10 +1,11 @@
 {
-  "codexVersion": "0.154.0",
+  "codexVersion": "0.158.0-alpha.2.1",
   "clientMethods": [
     "initialize",
     "config/read",
     "fs/createDirectory",
     "thread/start",
+    "thread/section/move",
     "thread/name/set",
     "thread/archive",
     "thread/resume",

@@ -1,3 +1,4 @@
+import { desktopCommentBody } from "./desktop-comment-body.js";
 import { hasActiveDesktopTurn } from "./desktop-execution-state.js";
 import { assertCommentsMutable } from "./comment-mutation-guard.js";
 import { identityKey, identityFromKey, IdentityKeySchema } from "@codexboard/contracts";
@@ -713,7 +714,8 @@ export class TaskWorkspace {
       const payload = JSON.parse(reply.payload) as Record<string, unknown>;
       const desktop = reply.kind === "codex.user_message";
       if (!desktop && payload.phase !== "final_answer") return [];
-      const body = typeof payload.text === "string" ? payload.text : reply.summary;
+      const text = typeof payload.text === "string" ? payload.text : reply.summary;
+      const body = desktop ? desktopCommentBody(text) : text;
       if (!body.trim()) return [];
       return [
         {

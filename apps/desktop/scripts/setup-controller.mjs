@@ -1,23 +1,17 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { posix } from "node:path";
 import { promisify } from "node:util";
 import { runSetupChecks } from "./setup-checks.mjs";
 import { readFrpcOrigin, readFrpcDnsTarget } from "./frpc-config.mjs";
 import {
+  canRunWindowsCodexCli,
   findWindowsCodexCli,
   findWindowsCodexPackage,
   windowsOpenArguments,
 } from "#codex-windows-app";
 
-const appPaths = () => [
-  "/Applications/Codex.app",
-  "/Applications/ChatGPT.app",
-  posix.join(homedir(), "Applications/Codex.app"),
-  posix.join(homedir(), "Applications/ChatGPT.app"),
-];
+import { macCodexAppPaths as appPaths, macCodexCandidates } from "./codex-path.mjs";
 
 export function detectCodexPath(
   exists = existsSync,
@@ -26,16 +20,20 @@ export function detectCodexPath(
     env = process.env,
     localAppData,
     findWindowsPackage = findWindowsCodexPackage,
+    canRunWindowsCli = canRunWindowsCodexCli,
   } = {},
 ) {
   if (platform === "win32")
-    return findWindowsCodexCli({ env, localAppData, exists, findWindowsPackage }) || "";
-  const candidates = [
-    ...appPaths().map((path) => posix.join(path, "Contents/Resources/codex")),
-    "/opt/homebrew/bin/codex",
-    "/usr/local/bin/codex",
-  ];
-  return candidates.find(exists) || candidates[0];
+    return (
+      findWindowsCodexCli({
+        env,
+        localAppData,
+        exists,
+        findWindowsPackage,
+        canRun: canRunWindowsCli,
+      }) || ""
+    );
+  return macCodexCandidates().find(exists) || "";
 }
 
 const targets = {
