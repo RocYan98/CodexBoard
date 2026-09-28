@@ -2405,6 +2405,10 @@ body.is-resizing-task-dialog {
   justify-content: space-between;
 }
 
+.tag-manager-dialog > header .icon-button:focus-visible {
+  outline-color: var(--border-strong);
+}
+
 .tag-manager-dialog > header > div {
   gap: 8px;
 }
@@ -4197,6 +4201,8 @@ body.is-resizing-task-dialog {
 .task-create-model-popover.remote-composer-popover {
   position: fixed;
   width: min(360px, calc(100vw - 48px));
+  max-height: none;
+  overflow: visible;
   padding: 16px;
   border-radius: 24px;
   transform: none;

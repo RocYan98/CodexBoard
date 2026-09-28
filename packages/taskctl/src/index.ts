@@ -82,7 +82,7 @@ export const TASKCTL_HELP = `taskctl — Taskboard 本机命令行（结果为 J
   member audit
   comment add --task ID --body TEXT [--attachments ID,ID]
   comment update ID --version N --body TEXT | comment delete ID --version N
-看板查询和写入均需要已授权的 Web 或飞书用户会话；health、backup create 仅需本机连接认证。
+看板查询和写入均需要已授权的 Web 或飞书用户会话；health、backup create、attachment download 仅需本机连接认证。
 评论作者固定为当前登录用户；Codex 执行结果由执行事件自动同步。
 更新时 --start/--due/--context null 清空字段；--labels "" 清空标签。
 --description "" 清空描述。版本冲突需重新读取，命令不会自动重试。
@@ -527,7 +527,10 @@ export async function runTaskctl(
     if (isAuth) return await runAuth(parsed, command, runtime, dependencies, secrets);
     const requiresUserSession = !(
       (command.path === "/api/v1/local/health" && !command.method) ||
-      (command.path === "/api/v1/local/backups" && command.method === "POST")
+      (command.path === "/api/v1/local/backups" && command.method === "POST") ||
+      (command.downloadPath !== undefined &&
+        command.path.startsWith("/api/v1/local/attachments/") &&
+        !command.method)
     );
     const session = requiresUserSession
       ? await readCredential(

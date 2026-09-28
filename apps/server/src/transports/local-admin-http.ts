@@ -324,7 +324,9 @@ export function createLocalAdminApp(options: CreateLocalAdminAppOptions): Fastif
     // bootstrap and machine operations explicit so new business routes fail closed.
     const machineOperation =
       ((request.method === "GET" || request.method === "HEAD") &&
-        (route === "/api/v1/local/health" || route === "/api/v1/local/web-accounts")) ||
+        (route === "/api/v1/local/health" ||
+          route === "/api/v1/local/web-accounts" ||
+          route === "/api/v1/local/attachments/:attachmentId")) ||
       (request.method === "POST" &&
         [
           "/api/v1/local/backups",
@@ -778,7 +780,7 @@ export function createLocalAdminApp(options: CreateLocalAdminAppOptions): Fastif
   app.get("/api/v1/local/attachments/:attachmentId", async (request, reply) => {
     const { attachmentId } = AttachmentParamsSchema.parse(request.params);
     const { preview } = AttachmentDownloadQuerySchema.parse(request.query);
-    const opened = attachments.open(attachmentId, requestActor(request));
+    const opened = attachments.openLocal(attachmentId);
     await reply
       .header("Content-Type", opened.metadata.contentType)
       .header(

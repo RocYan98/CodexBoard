@@ -33,7 +33,7 @@ CLI 自动读取私有运行时描述，不要读取或展示 `runtime.json`、�
 
 先按用户请求区分代码开发、查询、任务修改、执行和收尾。仅需在现有对话中开发代码时，不要发起 CLI 配对；已绑定任务的 Desktop 对话和结果由后台事件同步，不依赖 CLI 会话。
 
-需要通过 CLI 查询或操作看板时，先检查真实 Web 或飞书用户会话。所有业务读写均需用户登录，不能以本机服务身份执行；`health`、`backup create` 和登录引导是明确例外。已有有效且身份正确的授权可复用；安装技能、登录浏览器或 Codex 不等于已授权 CLI：
+需要通过 CLI 查询或操作看板时，先检查真实 Web 或飞书用户会话。看板业务读写均需用户登录，不能以本机服务身份执行；`health`、`backup create`、`attachment download` 和登录引导是明确例外。附件下载仅通过本机 loopback 管理接口和 runtime 能力令牌进行，不需要账号配对。已有有效且身份正确的授权可复用；安装技能、登录浏览器或 Codex 不等于已授权 CLI：
 
 ```sh
 "$TASKCTL" auth status
@@ -109,6 +109,11 @@ CLI 自动读取私有运行时描述，不要读取或展示 `runtime.json`、�
 ```sh
 "$TASKCTL" comment add --task TASK_ID --body "用户要求发布的评论"
 "$TASKCTL" attachment upload --task TASK_ID --file "/实际文件路径/evidence.txt"
+```
+
+附件下载不需要用户账号配对；使用本机 runtime 能力令牌，直接运行：
+
+```sh
 "$TASKCTL" attachment download ATTACHMENT_ID --output "/用户指定目录/evidence.txt"
 ```
 

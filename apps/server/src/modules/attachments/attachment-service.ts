@@ -227,6 +227,11 @@ export class AttachmentService {
     return { metadata: this.#view(record), bytes: this.#vault.open(record.storageKey) };
   }
 
+  openLocal(attachmentId: string): { readonly metadata: AttachmentView; readonly bytes: Buffer } {
+    const record = this.#readRecord(attachmentId);
+    return { metadata: this.#view(record), bytes: this.#vault.open(record.storageKey) };
+  }
+
   delete(attachmentId: string, context: MutationContext): WorkspaceMutationResult<AttachmentView> {
     const scope = `attachment.delete:${attachmentId}`;
     const requestHash = createHash("sha256").update(attachmentId).digest("hex");
